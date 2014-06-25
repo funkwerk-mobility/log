@@ -12,7 +12,7 @@ import std.traits;
 /// Defines the importance of a log message.
 enum LogLevel
 {
-	/// detailed tracing
+    /// detailed tracing
     trace = 1,
     /// useful information
     info = 2,
@@ -81,7 +81,7 @@ private void _log(LogLevel level, string file, size_t line, lazy string message)
 /// Represents a logging event.
 struct LogEvent
 {
-	/// local _time of the event
+    /// local _time of the event
     SysTime time;
     /// importance of the event
     LogLevel level;
@@ -349,18 +349,18 @@ void layout(Writer)(Writer writer, ref LogEvent event)
 
 unittest
 {
-	LogEvent event;
+    LogEvent event;
 
-	event.time = SysTime.fromISOExtString("2003-02-01T11:55:00.123456Z");
-	event.level = LogLevel.error;
-	event.file = "log.d";
-	event.line = 42;
-	event.message = "don't panic";
+    event.time = SysTime.fromISOExtString("2003-02-01T11:55:00.123456Z");
+    event.level = LogLevel.error;
+    event.file = "log.d";
+    event.line = 42;
+    event.message = "don't panic";
 
-	auto writer = appender!string;
+    auto writer = appender!string;
 
-	layout(writer, event);
-	assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
+    layout(writer, event);
+    assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
 // SysTime.toISOExtString has no fixed length and no time-zone offset for local time
