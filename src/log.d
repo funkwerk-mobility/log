@@ -157,10 +157,19 @@ auto rollingFileLogger(alias Layout = layout)
     return new RollingFileLogger!Layout(name ~ count.archiveFiles(name), size, levels);
 }
 
-auto rotatingFileLogger(alias Layout = layout)
-    (string name, uint levels = LogLevel.info.andHigher)
+version (Posix)
 {
-    return new RotatingFileLogger!Layout(name, levels);
+    auto rotatingFileLogger(alias Layout = layout)
+        (string name, uint levels = LogLevel.info.andHigher)
+    {
+        return new RotatingFileLogger!Layout(name, levels);
+    }
+
+    auto syslogLogger(alias Layout = syslogLayout)
+        (string name = null, uint levels = LogLevel.info.andHigher)
+    {
+        return new SyslogLogger!Layout(name, levels);
+    }
 }
 
 /// Returns n file names based on path for archived files.
@@ -271,7 +280,7 @@ version (Posix)
 
     private shared uint _count = 0;
 
-    extern (C) void hangup(int sig)
+    private extern (C) void hangup(int sig)
     {
        _count.atomicOp!"+="(1);
     }
@@ -320,6 +329,72 @@ version (Posix)
                 file.open(file.name, "ab");
             }
         }
+    }
+}
+
+
+version (Posix)
+{
+    private extern (C) void openlog(const char *ident, int option, int facility);
+    private extern (C) void syslog(int priority, const char *format, ...);
+
+    class SyslogLogger(alias Layout) : Logger
+    {
+        this(string identifier = null, uint levels = LogLevel.info.andHigher)
+        {
+            enum LOG_USER = 1 << 3;
+
+            super(levels);
+            openlog(identifier.empty ? null : identifier.toStringz, 0, LOG_USER);
+        }
+
+        override void log(ref LogEvent event)
+        {
+            enum SyslogLevel
+            {
+                LOG_EMERG   = 0,     /* system is unusable */
+                LOG_ALERT   = 1,     /* action must be taken immediately */
+                LOG_CRIT    = 2,     /* critical conditions */
+                LOG_ERR     = 3,     /* error conditions */
+                LOG_WARNING = 4,     /* warning conditions */
+                LOG_NOTICE  = 5,     /* normal but significant condition */
+                LOG_INFO    = 6,     /* informational */
+                LOG_DEBUG   = 7,     /* debug-level messages */
+            }
+
+            int priority;
+
+            final switch (event.level)
+            {
+                case LogLevel.trace:
+                    priority = SyslogLevel.LOG_DEBUG;
+                    break;
+                case LogLevel.info:
+                    priority = SyslogLevel.LOG_INFO;
+                    break;
+                case LogLevel.warn:
+                    priority = SyslogLevel.LOG_WARNING;
+                    break;
+                case LogLevel.error:
+                    priority = SyslogLevel.LOG_ERR;
+                    break;
+                case LogLevel.fatal:
+                    priority = SyslogLevel.LOG_CRIT;
+                    break;
+            }
+
+            auto messageWriter = appender!string();
+
+            Layout(messageWriter, event);
+            messageWriter.put('\0');
+            syslog(priority, "%s", messageWriter.data.ptr);
+        }
+    }
+
+    // layout
+    void syslogLayout(Writer)(Writer writer, ref LogEvent event)
+    {
+        writer.put(event.message);
     }
 }
 
