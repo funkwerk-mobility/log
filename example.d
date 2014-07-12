@@ -2,22 +2,18 @@
 
 import log;
 
-string everything()
+string details()
 {
     import std.stdio;
 
     writeln("lazy evaluation");
-    return "everything";
+    return "details";
 }
 
 void main()
 {
     Loggers = [stderrLogger, fileLogger("log")];
 
-    trace(everything);
-    info("the answer is %s", 42);
-    warn("mostly harmless");
-    error("don't panic"d);
     try
     {
         throw new Exception("something went wrong");
@@ -26,4 +22,8 @@ void main()
     {
         fatal(exception);
     }
+    error("don't panic"d);
+    warn("mostly harmless");
+    info("the answer is %s", 42);
+    trace(details);
 }

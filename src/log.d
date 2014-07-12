@@ -14,21 +14,29 @@ import std.stdio;
 import std.string;
 import std.traits;
 
+/// Defines the importance of a log message.
 enum LogLevel
 {
+    /// detailed tracing
     trace = 1,
+    /// useful information
     info = 2,
+    /// potential problem
     warn = 4,
+    /// recoverable _error
     error = 8,
+    /// _fatal failure
     fatal = 16,
 }
 
+/// Returns a bit set containing the level and all higher levels.
 @safe
 uint andHigher(LogLevel level) pure
 {
     return [EnumMembers!LogLevel].find(level).reduce!"a | b";
 }
 
+///
 unittest
 {
     with (LogLevel)
@@ -75,12 +83,18 @@ private void _log(LogLevel level, string file, size_t line, lazy string message)
     }
 }
 
+/// Represents a logging event.
 struct LogEvent
 {
+    /// local _time of the event
     SysTime time;
+    /// importance of the event
     LogLevel level;
+    /// _file name of the event source
     string file;
+    /// _line number of the event source
     size_t line;
+    /// supplied _message
     string message;
 }
 
@@ -154,6 +168,7 @@ auto rotatingFileLogger(alias Layout = layout)
     return new RotatingFileLogger!Layout(name, levels);
 }
 
+/// Returns n file names based on path for archived files.
 @safe
 string[] archiveFiles(size_t n, string path)
 {
@@ -165,10 +180,12 @@ string[] archiveFiles(size_t n, string path)
     return n.iota.map!(i => path.stripExtension ~ format(fmt, i + 1) ~ path.extension).array;
 }
 
+///
 unittest
 {
     assert(1.archiveFiles("dir/log.ext") == ["dir/log-1.ext"]);
     assert(10.archiveFiles("log").startsWith("log-01"));
+    assert(10.archiveFiles("log").endsWith("log-10"));
 }
 
 abstract class Logger
@@ -333,6 +350,22 @@ void layout(Writer)(Writer writer, ref LogEvent event)
         writer.put(message);
         writer.put('\n');
     }
+}
+
+unittest
+{
+    LogEvent event;
+
+    event.time = SysTime.fromISOExtString("2003-02-01T11:55:00.123456Z");
+    event.level = LogLevel.error;
+    event.file = "log.d";
+    event.line = 42;
+    event.message = "don't panic";
+
+    auto writer = appender!string;
+
+    layout(writer, event);
+    assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
 // SysTime.toISOExtString has no fixed length and no time-zone offset for local time
