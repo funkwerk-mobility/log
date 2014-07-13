@@ -1,3 +1,8 @@
+//          Copyright Mario Kröplin 2014.
+// Distributed under the Boost Software License, Version 1.0.
+//    (See accompanying file LICENSE_1_0.txt or copy at
+//          http://www.boost.org/LICENSE_1_0.txt)
+
 module log;
 
 import std.algorithm;
@@ -26,7 +31,7 @@ enum LogLevel
 
 /// Returns a bit set containing the level and all higher levels.
 @safe
-uint andHigher(LogLevel level) pure
+uint orHigher(LogLevel level) pure
 {
     return [EnumMembers!LogLevel].find(level).reduce!"a | b";
 }
@@ -36,8 +41,8 @@ unittest
 {
     with (LogLevel)
     {
-        assert(trace.andHigher == (trace | info | warn | error | fatal));
-        assert(fatal.andHigher == fatal);
+        assert(trace.orHigher == (trace | info | warn | error | fatal));
+        assert(fatal.orHigher == fatal);
     }
 }
 
@@ -134,25 +139,25 @@ struct Loggers
 }
 
 auto fileLogger(alias Layout = layout)
-    (string name, uint levels = LogLevel.info.andHigher)
+    (string name, uint levels = LogLevel.info.orHigher)
 {
     return new FileLogger!Layout(name, levels);
 }
 
 auto stderrLogger(alias Layout = layout)
-    (uint levels = LogLevel.warn.andHigher)
+    (uint levels = LogLevel.warn.orHigher)
 {
     return new FileLogger!Layout(stderr, levels);
 }
 
 auto stdoutLogger(alias Layout = layout)
-    (uint levels = LogLevel.info.andHigher)
+    (uint levels = LogLevel.info.orHigher)
 {
     return new FileLogger!Layout(stdout, levels);
 }
 
 auto rollingFileLogger(alias Layout = layout)
-    (string name, size_t count, size_t size, uint levels = LogLevel.info.andHigher)
+    (string name, size_t count, size_t size, uint levels = LogLevel.info.orHigher)
 {
     return new RollingFileLogger!Layout(name ~ count.archiveFiles(name), size, levels);
 }
@@ -160,13 +165,13 @@ auto rollingFileLogger(alias Layout = layout)
 version (Posix)
 {
     auto rotatingFileLogger(alias Layout = layout)
-        (string name, uint levels = LogLevel.info.andHigher)
+        (string name, uint levels = LogLevel.info.orHigher)
     {
         return new RotatingFileLogger!Layout(name, levels);
     }
 
     auto syslogLogger(alias Layout = syslogLayout)
-        (string name = null, uint levels = LogLevel.info.andHigher)
+        (string name = null, uint levels = LogLevel.info.orHigher)
     {
         return new SyslogLogger!Layout(name, levels);
     }
@@ -208,13 +213,13 @@ class FileLogger(alias Layout) : Logger
 {
     private File file;
 
-    this(string name, uint levels = LogLevel.info.andHigher)
+    this(string name, uint levels = LogLevel.info.orHigher)
     {
         super(levels);
         file = File(name, "ab");
     }
 
-    this(File file, uint levels = LogLevel.info.andHigher)
+    this(File file, uint levels = LogLevel.info.orHigher)
     {
         super(levels);
         this.file = file;
@@ -233,7 +238,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
     private size_t size;
 
-    this(in string[] names, size_t size, uint levels = LogLevel.info.andHigher)
+    this(in string[] names, size_t size, uint levels = LogLevel.info.orHigher)
     in
     {
         assert(!names.empty);
@@ -289,7 +294,7 @@ version (Posix)
     {
         private uint count = 0;
 
-        this(string name, uint levels = LogLevel.info.andHigher)
+        this(string name, uint levels = LogLevel.info.orHigher)
         {
             super(name, levels);
             setUpSignalHandler;
@@ -340,7 +345,7 @@ version (Posix)
 
     class SyslogLogger(alias Layout) : Logger
     {
-        this(string identifier = null, uint levels = LogLevel.info.andHigher)
+        this(string identifier = null, uint levels = LogLevel.info.orHigher)
         {
             enum LOG_USER = 1 << 3;
 

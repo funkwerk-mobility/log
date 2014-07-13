@@ -1,8 +1,8 @@
 {
-	"name": "log",
-	"description": "Simple Logging for D",
-	"copyright": "Copyright © 2014, Mario Kröplin",
-	"authors": ["Mario Kröplin"],
-	"dependencies": {
-	}
+    "name": "log",
+    "description": "Simple Logging for D",
+    "copyright": "Copyright © 2014, Mario Kröplin",
+    "authors": ["Mario Kröplin"],
+    "license" : "BSL-1.0",
+    "dependencies": {}
 }
