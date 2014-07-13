@@ -1,2 +1,3 @@
-liblog.a
+*.a
 dub.selections.json
+log
