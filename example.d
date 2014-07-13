@@ -1,6 +1,6 @@
 #!/usr/bin/env rdmd -unittest -Isrc
 
-import log;
+static import log;
 
 string details()
 {
@@ -12,7 +12,7 @@ string details()
 
 void main()
 {
-    Loggers = [stderrLogger, fileLogger("log")];
+    log.Loggers = [log.stderrLogger, log.fileLogger("log")];
 
     try
     {
@@ -20,10 +20,10 @@ void main()
     }
     catch (Exception exception)
     {
-        fatal(exception);
+        log.fatal(exception);
     }
-    error("don't panic"d);
-    warn("mostly harmless");
-    info("the answer is %s", 42);
-    trace(details);
+    log.error("don't panic"d);
+    log.warn("mostly harmless");
+    log.info("the answer is %s", 42);
+    log.trace(details);
 }
