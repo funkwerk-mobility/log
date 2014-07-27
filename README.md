@@ -6,7 +6,7 @@ This is a simple logging framework for the
 
 Examples
 --------
-Run the included example to see the simple logging in action:
+Run the included [example](example.d) to see the simple logging in action:
 
     ./example.d
 

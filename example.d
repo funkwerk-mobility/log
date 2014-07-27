@@ -12,7 +12,10 @@ string details()
 
 void main()
 {
-    log.Loggers = [log.stderrLogger, log.fileLogger("log")];
+    with (log)
+    {
+        Loggers = [stderrLogger, stdoutLogger(LogLevel.info), fileLogger("log")];
+    }
 
     try
     {

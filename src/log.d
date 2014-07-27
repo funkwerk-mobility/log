@@ -163,19 +163,18 @@ auto rollingFileLogger(alias Layout = layout)
 }
 
 version (Posix)
-{
     auto rotatingFileLogger(alias Layout = layout)
         (string name, uint levels = LogLevel.info.orHigher)
     {
         return new RotatingFileLogger!Layout(name, levels);
     }
 
+version (Posix)
     auto syslogLogger(alias Layout = syslogLayout)
         (string name = null, uint levels = LogLevel.info.orHigher)
     {
         return new SyslogLogger!Layout(name, levels);
     }
-}
 
 /// Returns n file names based on path for archived files.
 @safe
@@ -341,10 +340,23 @@ version (Posix)
 version (Posix)
 {
     private extern (C) void openlog(const char *ident, int option, int facility);
+
     private extern (C) void syslog(int priority, const char *format, ...);
 
     class SyslogLogger(alias Layout) : Logger
     {
+        enum SyslogLevel
+        {
+            LOG_EMERG   = 0,  // system is unusable
+            LOG_ALERT   = 1,  // action must be taken immediately
+            LOG_CRIT    = 2,  // critical conditions
+            LOG_ERR     = 3,  // error conditions
+            LOG_WARNING = 4,  // warning conditions
+            LOG_NOTICE  = 5,  // normal but significant condition
+            LOG_INFO    = 6,  // informational
+            LOG_DEBUG   = 7,  // debug-level messages
+        }
+
         this(string identifier = null, uint levels = LogLevel.info.orHigher)
         {
             enum LOG_USER = 1 << 3;
@@ -355,48 +367,31 @@ version (Posix)
 
         override void log(ref LogEvent event)
         {
-            enum SyslogLevel
+            auto writer = appender!string;
+
+            Layout(writer, event);
+            writer.put('\0');
+            syslog(priority(event.level), "%s", writer.data.ptr);
+        }
+
+        private static SyslogLevel priority(LogLevel level) pure
+        {
+            final switch (level) with (LogLevel) with (SyslogLevel)
             {
-                LOG_EMERG   = 0,     /* system is unusable */
-                LOG_ALERT   = 1,     /* action must be taken immediately */
-                LOG_CRIT    = 2,     /* critical conditions */
-                LOG_ERR     = 3,     /* error conditions */
-                LOG_WARNING = 4,     /* warning conditions */
-                LOG_NOTICE  = 5,     /* normal but significant condition */
-                LOG_INFO    = 6,     /* informational */
-                LOG_DEBUG   = 7,     /* debug-level messages */
+                case trace:
+                    return LOG_DEBUG;
+                case info:
+                    return LOG_INFO;
+                case warn:
+                    return LOG_WARNING;
+                case error:
+                    return LOG_ERR;
+                case fatal:
+                    return LOG_CRIT;
             }
-
-            int priority;
-
-            final switch (event.level)
-            {
-                case LogLevel.trace:
-                    priority = SyslogLevel.LOG_DEBUG;
-                    break;
-                case LogLevel.info:
-                    priority = SyslogLevel.LOG_INFO;
-                    break;
-                case LogLevel.warn:
-                    priority = SyslogLevel.LOG_WARNING;
-                    break;
-                case LogLevel.error:
-                    priority = SyslogLevel.LOG_ERR;
-                    break;
-                case LogLevel.fatal:
-                    priority = SyslogLevel.LOG_CRIT;
-                    break;
-            }
-
-            auto messageWriter = appender!string();
-
-            Layout(messageWriter, event);
-            messageWriter.put('\0');
-            syslog(priority, "%s", messageWriter.data.ptr);
         }
     }
 
-    // layout
     void syslogLayout(Writer)(Writer writer, ref LogEvent event)
     {
         writer.put(event.message);
@@ -455,7 +450,7 @@ private string _toISOExtString(SysTime time)
 unittest
 {
     auto dateTime = DateTime(2003, 2, 1, 12);
-    auto fracSec = FracSec.from!"usecs"(123456);
+    auto fracSec = FracSec.from!"usecs"(123_456);
     auto timeZone =  new immutable SimpleTimeZone(1.hours);
     auto time = SysTime(dateTime, fracSec, timeZone);
 
