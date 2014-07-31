@@ -1,6 +1,6 @@
 #!/usr/bin/env rdmd -unittest -Isrc
 
-static import log;
+import util.log;
 
 string details()
 {
@@ -12,10 +12,7 @@ string details()
 
 void main()
 {
-    with (log)
-    {
-        Loggers = [stderrLogger, stdoutLogger(LogLevel.info), fileLogger("log")];
-    }
+    log = Log(stderrLogger, stdoutLogger(LogLevel.info), fileLogger("log"));
 
     try
     {
@@ -25,8 +22,15 @@ void main()
     {
         log.fatal(exception);
     }
-    log.error("don't panic"d);
-    log.warn("mostly harmless");
+    log.error("don't panic");
+    log.warn("mostly harmless"d);
     log.info("the answer is %s", 42);
     log.trace(details);
+
+    version (Posix)
+    {
+        Log syslog = Log(syslogLogger);
+
+        syslog.error("don't panic");
+    }
 }

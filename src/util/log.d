@@ -3,13 +3,14 @@
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
 
-module log;
+module util.log;
 
 import std.algorithm;
 import std.array;
 import std.conv;
 import std.datetime;
 import std.format;
+import std.range;
 import std.stdio;
 import std.string;
 import std.traits;
@@ -29,9 +30,9 @@ enum LogLevel
     fatal = 16,
 }
 
-/// Returns a bit set containing the level and all higher levels.
+/// Returns a bit set containing the level and all levels above.
 @safe
-uint orHigher(LogLevel level) pure
+uint orAbove(LogLevel level) pure
 {
     return [EnumMembers!LogLevel].find(level).reduce!"a | b";
 }
@@ -41,46 +42,110 @@ unittest
 {
     with (LogLevel)
     {
-        assert(trace.orHigher == (trace | info | warn | error | fatal));
-        assert(fatal.orHigher == fatal);
+        assert(trace.orAbove == (trace | info | warn | error | fatal));
+        assert(fatal.orAbove == fatal);
     }
 }
 
-alias trace=log!(LogLevel.trace);
-alias info=log!(LogLevel.info);
-alias warn=log!(LogLevel.warn);
-alias error=log!(LogLevel.error);
-alias fatal=log!(LogLevel.fatal);
-
-template log(LogLevel level)
+/// Returns a bit set containing the level and all levels below.
+@safe
+uint orBelow(LogLevel level) pure
 {
-    void log(string file = __FILE__, size_t line = __LINE__, Char, A...)(in Char[] fmt, lazy A args)
-    {
-        _log(level, file, line, format(fmt, args));
-    }
+    return [EnumMembers!LogLevel].retro.find(level).reduce!"a | b";
+}
 
-    void log(string file = __FILE__, size_t line = __LINE__, A)(lazy A arg)
+///
+unittest
+{
+    with (LogLevel)
     {
-        _log(level, file, line, arg.to!string);
+        assert(trace.orBelow == trace);
+        assert(fatal.orBelow == (trace | info | warn | error | fatal));
     }
 }
 
-private void _log(LogLevel level, string file, size_t line, lazy string message)
+@safe
+bool disabled(LogLevel level) pure
 {
-    with (Loggers.instance)
+    uint levels = 0;
+
+    with (LogLevel)
     {
-        if (level & levels)
+        version (DisableTrace)
+            levels |= trace;
+        version (DisableInfo)
+            levels |= info;
+        version (DisableWarn)
+            levels |= warn;
+        version (DisableError)
+            levels |= error;
+        version (DisableFatal)
+            levels |= fatal;
+    }
+    return (level & levels) != 0;
+}
+
+struct Log
+{
+    private Logger[] loggers;
+
+    private uint levels;
+
+    this(Logger[] loggers ...)
+    in
+    {
+        assert(loggers.all!"a !is null");
+    }
+    body
+    {
+        this.loggers = loggers.dup;
+        levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
+    }
+
+    alias trace = append!(LogLevel.trace);
+    alias info = append!(LogLevel.info);
+    alias warn = append!(LogLevel.warn);
+    alias error = append!(LogLevel.error);
+    alias fatal = append!(LogLevel.fatal);
+
+    template append(LogLevel level)
+    {
+        void append(string file = __FILE__, size_t line = __LINE__, Char, A...)(in Char[] fmt, lazy A args)
         {
-            LogEvent event;
+            static if (!level.disabled)
+                if (level & levels)
+                    _append(level, file, line, format(fmt, args));
+        }
 
-            event.time = Clock.currTime;
-            event.level = level;
-            event.file = file;
-            event.line = line;
-            event.message = message;
-            log(event);
+        void append(string file = __FILE__, size_t line = __LINE__, A)(lazy A arg)
+        {
+            static if (!level.disabled)
+                if (level & levels)
+                    _append(level, file, line, arg.to!string);
         }
     }
+
+    private void _append(LogLevel level, string file, size_t line, string message)
+    {
+        LogEvent event;
+
+        event.time = Clock.currTime;
+        event.level = level;
+        event.file = file;
+        event.line = line;
+        event.message = message;
+
+        foreach (logger; loggers)
+            if (level & logger.levels)
+                logger.append(event);
+    }
+}
+
+__gshared Log log;
+
+shared static this()
+{
+    log = Log(stderrLogger);
 }
 
 /// Represents a logging event.
@@ -98,80 +163,40 @@ struct LogEvent
     string message;
 }
 
-struct Loggers
-{
-    private static __gshared Loggers instance;
-
-    private Logger[] loggers;
-
-    private uint levels;
-
-    private shared static this()
-    {
-        Loggers = [stderrLogger];
-    }
-
-    static opAssign(Logger[] loggers)
-    in
-    {
-        assert(loggers.all!"a !is null");
-    }
-    body
-    {
-        instance = Loggers(loggers);
-    }
-
-    private this(Logger[] loggers)
-    {
-        this.loggers = loggers.dup;
-        levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
-    }
-
-    @disable
-    this();
-
-    void log(ref LogEvent event)
-    {
-        foreach (logger; loggers)
-            if (event.level & logger.levels)
-                logger.log(event);
-    }
-}
-
 auto fileLogger(alias Layout = layout)
-    (string name, uint levels = LogLevel.info.orHigher)
+    (string name, uint levels = LogLevel.info.orAbove)
 {
     return new FileLogger!Layout(name, levels);
 }
 
 auto stderrLogger(alias Layout = layout)
-    (uint levels = LogLevel.warn.orHigher)
+    (uint levels = LogLevel.warn.orAbove)
 {
     return new FileLogger!Layout(stderr, levels);
 }
 
 auto stdoutLogger(alias Layout = layout)
-    (uint levels = LogLevel.info.orHigher)
+    (uint levels = LogLevel.info.orAbove)
 {
     return new FileLogger!Layout(stdout, levels);
 }
 
 auto rollingFileLogger(alias Layout = layout)
-    (string name, size_t count, size_t size, uint levels = LogLevel.info.orHigher)
+    (string name, size_t count, size_t size, uint levels = LogLevel.info.orAbove)
 {
     return new RollingFileLogger!Layout(name ~ count.archiveFiles(name), size, levels);
 }
 
 version (Posix)
     auto rotatingFileLogger(alias Layout = layout)
-        (string name, uint levels = LogLevel.info.orHigher)
+        (string name, uint levels = LogLevel.info.orAbove)
     {
         return new RotatingFileLogger!Layout(name, levels);
     }
 
 version (Posix)
     auto syslogLogger(alias Layout = syslogLayout)
-        (string name = null, uint levels = LogLevel.info.orHigher)
+        (string name = null, uint levels = LogLevel.info.orAbove)
     {
         return new SyslogLogger!Layout(name, levels);
     }
@@ -205,26 +230,26 @@ abstract class Logger
         this.levels = levels;
     }
 
-    abstract void log(ref LogEvent event);
+    abstract void append(ref LogEvent event);
 }
 
 class FileLogger(alias Layout) : Logger
 {
     private File file;
 
-    this(string name, uint levels = LogLevel.info.orHigher)
+    this(string name, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         file = File(name, "ab");
     }
 
-    this(File file, uint levels = LogLevel.info.orHigher)
+    this(File file, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         this.file = file;
     }
 
-    override void log(ref LogEvent event)
+    override void append(ref LogEvent event)
     {
         Layout(this.file.lockingTextWriter, event);
         this.file.flush;
@@ -237,7 +262,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
     private size_t size;
 
-    this(in string[] names, size_t size, uint levels = LogLevel.info.orHigher)
+    this(in string[] names, size_t size, uint levels = LogLevel.info.orAbove)
     in
     {
         assert(!names.empty);
@@ -249,7 +274,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
         super(names[0], levels);
     }
 
-    override void log(ref LogEvent event)
+    override void append(ref LogEvent event)
     {
         synchronized (this)
         {
@@ -257,7 +282,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
             {
                 roll;
             }
-            super.log(event);
+            super.append(event);
         }
     }
 
@@ -293,7 +318,7 @@ version (Posix)
     {
         private uint count = 0;
 
-        this(string name, uint levels = LogLevel.info.orHigher)
+        this(string name, uint levels = LogLevel.info.orAbove)
         {
             super(name, levels);
             setUpSignalHandler;
@@ -310,7 +335,7 @@ version (Posix)
             enforce(sigaction(SIGHUP, &action, null) == 0);
         }
 
-        override void log(ref LogEvent event)
+        override void append(ref LogEvent event)
         {
             uint count = _count.atomicLoad;
 
@@ -321,7 +346,7 @@ version (Posix)
                     reopen;
                     this.count = count;
                 }
-                super.log(event);
+                super.append(event);
             }
         }
 
@@ -357,7 +382,7 @@ version (Posix)
             LOG_DEBUG   = 7,  // debug-level messages
         }
 
-        this(string identifier = null, uint levels = LogLevel.info.orHigher)
+        this(string identifier = null, uint levels = LogLevel.info.orAbove)
         {
             enum LOG_USER = 1 << 3;
 
@@ -365,7 +390,7 @@ version (Posix)
             openlog(identifier.empty ? null : identifier.toStringz, 0, LOG_USER);
         }
 
-        override void log(ref LogEvent event)
+        override void append(ref LogEvent event)
         {
             auto writer = appender!string;
 
@@ -374,7 +399,7 @@ version (Posix)
             syslog(priority(event.level), "%s", writer.data.ptr);
         }
 
-        private static SyslogLevel priority(LogLevel level) pure
+        static SyslogLevel priority(LogLevel level) pure
         {
             final switch (level) with (LogLevel) with (SyslogLevel)
             {
