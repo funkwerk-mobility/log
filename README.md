@@ -4,6 +4,8 @@ Simple Logging for D
 This is a simple logging framework for the
 [D Programming Language](http://dlang.org).
 
+The simple logging framework is known to work with version D 2.066.1.
+
 Examples
 --------
 Run the included [example](example.d) to see the simple logging in action:

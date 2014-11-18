@@ -205,8 +205,8 @@ version (Posix)
 @safe
 string[] archiveFiles(size_t n, string path)
 {
-    import std.path;
-    import std.range;
+    import std.path : extension, stripExtension;
+    import std.range : iota;
 
     string fmt = "-%%0%ss".format(n.to!string.length);
 
@@ -288,7 +288,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
     private void roll()
     {
-        import std.file;
+        import std.file : exists, rename;
 
         foreach_reverse (i, destination; names[1 .. $])
         {
@@ -426,7 +426,7 @@ version (Posix)
 // Time Thread Category Context layout
 void layout(Writer)(Writer writer, ref LogEvent event)
 {
-    import core.thread;
+    import core.thread : Thread;
 
     with (event)
     {
@@ -483,13 +483,14 @@ unittest
 }
 
 // SimpleTimeZone.toISOString is private
- @safe
- private string _toISOString(Duration offset) pure
+@safe
+private string _toISOString(Duration offset) pure
 {
-    if (offset.isNegative)
-        return format("-%02d:%02d", -offset.hours, -offset.minutes);
-    else
-        return format("+%02d:%02d", offset.hours, offset.minutes);
+    uint hours;
+    uint minutes;
+
+    abs(offset).split!("hours", "minutes")(hours, minutes);
+    return format("%s%02d:%02d", offset.isNegative ? '-' : '+', hours, minutes);
 }
 
 unittest
