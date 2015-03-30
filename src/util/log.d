@@ -208,9 +208,9 @@ string[] archiveFiles(size_t n, string path)
     import std.path : extension, stripExtension;
     import std.range : iota;
 
-    string fmt = "-%%0%ss".format(n.to!string.length);
+    auto length = n.to!string.length;
 
-    return n.iota.map!(i => path.stripExtension ~ format(fmt, i + 1) ~ path.extension).array;
+    return n.iota.map!(i => format("%s-%0*s%s", path.stripExtension, length, i + 1, path.extension)).array;
 }
 
 ///
