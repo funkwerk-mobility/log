@@ -468,16 +468,16 @@ private string _toISOExtString(SysTime time)
 {
     return format("%s.%03d%s",
         (cast (DateTime) time).toISOExtString,
-        time.fracSec.msecs,
+        time.fracSecs.total!"msecs",
         time.utcOffset._toISOString);
 }
 
 unittest
 {
     auto dateTime = DateTime(2003, 2, 1, 12);
-    auto fracSec = FracSec.from!"usecs"(123_456);
+    auto fracSecs = 123_456.usecs;
     auto timeZone =  new immutable SimpleTimeZone(1.hours);
-    auto time = SysTime(dateTime, fracSec, timeZone);
+    auto time = SysTime(dateTime, fracSecs, timeZone);
 
     assert(time._toISOExtString == "2003-02-01T12:00:00.123+01:00");
 }
