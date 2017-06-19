@@ -1,4 +1,4 @@
-//          Copyright Mario Kröplin 2014.
+//          Copyright Mario Kröplin 2017.
 // Distributed under the Boost Software License, Version 1.0.
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
@@ -303,14 +303,12 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
 version (Posix)
 {
-    import core.atomic;
-    import core.sys.posix.signal;
-    import std.exception;
-
     private shared uint _count = 0;
 
-    private extern (C) void hangup(int sig)
+    private extern (C) void hangup(int sig) nothrow @nogc
     {
+        import core.atomic : atomicOp;
+
        _count.atomicOp!"+="(1);
     }
 
@@ -326,17 +324,17 @@ version (Posix)
 
         private void setUpSignalHandler()
         {
-            sigaction_t action;
+            import core.stdc.signal : signal, SIG_ERR;
+            import core.sys.posix.signal : SIGHUP;
+            import std.exception : enforce;
 
-            action.sa_handler = &hangup;
-            sigemptyset(&action.sa_mask);
-            action.sa_flags = SA_RESTART;
-
-            enforce(sigaction(SIGHUP, &action, null) == 0);
+            enforce(signal(SIGHUP, &hangup) !is SIG_ERR);
         }
 
         override void append(ref LogEvent event)
         {
+            import core.atomic : atomicLoad;
+
             uint count = _count.atomicLoad;
 
             synchronized (this)
@@ -360,7 +358,6 @@ version (Posix)
         }
     }
 }
-
 
 version (Posix)
 {
