@@ -1,4 +1,8 @@
-#!/usr/bin/env rdmd -unittest -Isrc
+#!/usr/bin/env dub
+/+ dub.sdl:
+name "example"
+dependency "log" path="."
++/
 
 import util.log;
 
