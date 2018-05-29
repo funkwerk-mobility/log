@@ -1,4 +1,4 @@
-//          Copyright Mario Kröplin 2017.
+//          Copyright Mario Kröplin 2018.
 // Distributed under the Boost Software License, Version 1.0.
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
@@ -110,14 +110,22 @@ struct Log
 
     template append(LogLevel level)
     {
-        void append(string file = __FILE__, size_t line = __LINE__, Char, A...)(in Char[] fmt, lazy A args)
+        void append(alias fmt, size_t line = __LINE__, string file = __FILE__, A...)(lazy A args)
+        if (isSomeString!(typeof(fmt)))
+        {
+            static if (!level.disabled)
+                if (level & levels)
+                    _append(level, file, line, format!fmt(args));
+        }
+
+        void append(size_t line = __LINE__, string file = __FILE__, Char, A...)(in Char[] fmt, lazy A args)
         {
             static if (!level.disabled)
                 if (level & levels)
                     _append(level, file, line, format(fmt, args));
         }
 
-        void append(string file = __FILE__, size_t line = __LINE__, A)(lazy A arg)
+        void append(size_t line = __LINE__, string file = __FILE__, A)(lazy A arg)
         {
             static if (!level.disabled)
                 if (level & levels)
@@ -210,7 +218,9 @@ string[] archiveFiles(size_t n, string path)
 
     auto length = n.to!string.length;
 
-    return n.iota.map!(i => format("%s-%0*s%s", path.stripExtension, length, i + 1, path.extension)).array;
+    return n.iota
+        .map!(i => format!"%s-%0*s%s"(path.stripExtension, length, i + 1, path.extension))
+        .array;
 }
 
 ///
@@ -427,15 +437,14 @@ void layout(Writer)(Writer writer, ref LogEvent event)
 
     with (event)
     {
-        writer.formattedWrite("%s %-5s %s:%s",
-                time._toISOExtString, level, file, line);
+        writer.formattedWrite!"%s %-5s %s:%s"(time._toISOExtString, level, file, line);
 
         if (Thread thread = Thread.getThis)
         {
             string name = thread.name;
 
             if (!name.empty)
-                writer.formattedWrite(" [%s]", name);
+                writer.formattedWrite!" [%s]"(name);
         }
 
         writer.put(' ');
@@ -463,7 +472,7 @@ unittest
 // SysTime.toISOExtString has no fixed length and no time-zone offset for local time
 private string _toISOExtString(SysTime time)
 {
-    return format("%s.%03d%s",
+    return format!"%s.%03d%s"(
         (cast (DateTime) time).toISOExtString,
         time.fracSecs.total!"msecs",
         time.utcOffset._toISOString);
@@ -487,7 +496,7 @@ private string _toISOString(Duration offset) pure
     uint minutes;
 
     abs(offset).split!("hours", "minutes")(hours, minutes);
-    return format("%s%02d:%02d", offset.isNegative ? '-' : '+', hours, minutes);
+    return format!"%s%02d:%02d"(offset.isNegative ? '-' : '+', hours, minutes);
 }
 
 unittest

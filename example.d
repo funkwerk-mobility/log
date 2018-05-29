@@ -29,6 +29,7 @@ void main()
     log.error("don't panic");
     log.warn("mostly harmless"d);
     log.info("the answer is %s", 42);
+    log.info!"the answer is %s"(42);
     log.trace(details);
 
     version (Posix)
