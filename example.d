@@ -8,7 +8,7 @@ import util.log;
 
 string details()
 {
-    import std.stdio;
+    import std.stdio : writeln;
 
     writeln("lazy evaluation");
     return "details";

@@ -108,9 +108,12 @@ struct Log
     alias error = append!(LogLevel.error);
     alias fatal = append!(LogLevel.fatal);
 
+    private struct Fence {}  // argument cannot be provided explicitly
+
     template append(LogLevel level)
     {
-        void append(alias fmt, size_t line = __LINE__, string file = __FILE__, A...)(lazy A args)
+        void append(alias fmt, Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A...)
+            (lazy A args)
         if (isSomeString!(typeof(fmt)))
         {
             static if (!level.disabled)
@@ -118,14 +121,16 @@ struct Log
                     _append(level, file, line, format!fmt(args));
         }
 
-        void append(size_t line = __LINE__, string file = __FILE__, Char, A...)(in Char[] fmt, lazy A args)
+        void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, Char, A...)
+            (in Char[] fmt, lazy A args)
         {
             static if (!level.disabled)
                 if (level & levels)
                     _append(level, file, line, format(fmt, args));
         }
 
-        void append(size_t line = __LINE__, string file = __FILE__, A)(lazy A arg)
+        void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A)
+            (lazy A arg)
         {
             static if (!level.disabled)
                 if (level & levels)
