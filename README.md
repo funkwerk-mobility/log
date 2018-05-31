@@ -1,6 +1,8 @@
 Simple Logging for D
 ====================
 
+[![Build Status](https://travis-ci.org/linkrope/log.svg?branch=master)](https://travis-ci.org/linkrope/log)
+
 This is a simple logging framework for the
 [D Programming Language](http://dlang.org).
 
