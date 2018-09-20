@@ -223,8 +223,9 @@ string[] archiveFiles(size_t n, string path)
 
     auto length = n.to!string.length;
 
+    // FIXME switch back to templated syntax once dlang issue 19252 is fixed
     return n.iota
-        .map!(i => format!"%s-%0*s%s"(path.stripExtension, length, i + 1, path.extension))
+        .map!(i => format("%s-%0*s%s", path.stripExtension, length, i + 1, path.extension))
         .array;
 }
 
