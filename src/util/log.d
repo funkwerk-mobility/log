@@ -26,8 +26,10 @@ enum LogLevel
     warn = 4,
     /// recoverable _error
     error = 8,
+    /// heading: repeated at the top of each logfile
+    heading = 16,
     /// _fatal failure
-    fatal = 16,
+    fatal = 32,
 }
 
 /// Returns a bit set containing the level and all levels above.
@@ -42,7 +44,7 @@ unittest
 {
     with (LogLevel)
     {
-        assert(trace.orAbove == (trace | info | warn | error | fatal));
+        assert(trace.orAbove == (trace | info | warn | error | heading | fatal));
         assert(fatal.orAbove == fatal);
     }
 }
@@ -60,7 +62,7 @@ unittest
     with (LogLevel)
     {
         assert(trace.orBelow == trace);
-        assert(fatal.orBelow == (trace | info | warn | error | fatal));
+        assert(fatal.orBelow == (trace | info | warn | error | heading | fatal));
     }
 }
 
@@ -79,6 +81,8 @@ bool disabled(LogLevel level) pure
             levels |= warn;
         version (DisableError)
             levels |= error;
+        version (DisableHeading)
+            levels |= heading;
         version (DisableFatal)
             levels |= fatal;
     }
@@ -106,6 +110,7 @@ struct Log
     alias info = append!(LogLevel.info);
     alias warn = append!(LogLevel.warn);
     alias error = append!(LogLevel.error);
+    alias heading = append!(LogLevel.heading);
     alias fatal = append!(LogLevel.fatal);
 
     private struct Fence {}  // argument cannot be provided explicitly
@@ -277,6 +282,8 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
     private size_t size;
 
+    private LogEvent[] header = null;
+
     this(in string[] names, size_t size, uint levels = LogLevel.info.orAbove)
     in
     {
@@ -296,8 +303,14 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
             if (file.size >= size)
             {
                 roll;
+                this.header.each!(event => super.append(event));
             }
             super.append(event);
+
+            if (event.level == LogLevel.heading)
+            {
+                this.header ~= event;
+            }
         }
     }
 
@@ -331,6 +344,8 @@ version (Posix)
     {
         private uint count = 0;
 
+        private LogEvent[] header = null;
+
         this(string name, uint levels = LogLevel.info.orAbove)
         {
             super(name, levels);
@@ -358,8 +373,14 @@ version (Posix)
                 {
                     reopen;
                     this.count = count;
+                    this.header.each!(event => super.append(event));
                 }
                 super.append(event);
+
+                if (event.level == LogLevel.heading)
+                {
+                    this.header ~= event;
+                }
             }
         }
 
@@ -417,7 +438,7 @@ version (Posix)
             {
                 case trace:
                     return LOG_DEBUG;
-                case info:
+                case info, heading:
                     return LOG_INFO;
                 case warn:
                     return LOG_WARNING;
