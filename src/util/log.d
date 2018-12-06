@@ -152,6 +152,12 @@ struct Log
             if (level & logger.levels)
                 logger.append(event);
     }
+
+    public void logCrash(string message)
+    {
+        foreach (logger; loggers)
+            logger.logCrash(message);
+    }
 }
 
 __gshared Log log;
@@ -246,6 +252,8 @@ abstract class Logger
     }
 
     abstract void append(ref LogEvent event);
+
+    abstract void logCrash(string message); // must only use signal-safe functions
 }
 
 class FileLogger(alias Layout) : Logger
@@ -268,6 +276,11 @@ class FileLogger(alias Layout) : Logger
     {
         Layout(this.file.lockingTextWriter, event);
         this.file.flush;
+    }
+
+    override void logCrash(string message)
+    {
+        logBacktrace(this.file, message);
     }
 }
 
@@ -427,11 +440,53 @@ version (Posix)
                     return LOG_CRIT;
             }
         }
+
+        override void logCrash(string message)
+        {
+            logBacktrace(stderr, message);
+        }
     }
 
     void syslogLayout(Writer)(Writer writer, ref LogEvent event)
     {
         writer.put(event.message);
+    }
+}
+
+version (linux)
+{
+    private void logBacktrace(ref File file, string message)
+    {
+        import core.sys.linux.execinfo : backtrace, backtrace_symbols_fd;
+        import core.sys.posix.unistd : write;
+
+        write(file.fileno, message.ptr, message.length);
+        write(file.fileno, "\n".ptr, 1);
+
+        enum maxBacktraceLength = 1000;
+        void*[maxBacktraceLength] buffer = void;
+        int backtraceLength = backtrace(buffer.ptr, buffer.length);
+
+        backtrace_symbols_fd(buffer.ptr, backtraceLength, file.fileno);
+    }
+
+    shared static this()
+    {
+        import core.sys.linux.execinfo : backtrace;
+
+        // ensure the library is loaded so that logBacktrace doesn't need to invoke the dynamic linker,
+        // which is not signal safe
+        // see man 3 backtrace /NOTES
+        backtrace(null, 0);
+    }
+}
+else
+{
+    private void logBacktrace(ref File file)
+    {
+        // not async-safe, but best-effort
+        file.put(message);
+        file.put("\n");
     }
 }
 
