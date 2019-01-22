@@ -85,6 +85,8 @@ bool disabled(LogLevel level) pure
     return (level & levels) != 0;
 }
 
+private alias SinkDg = void delegate(const(char)[]);
+
 struct Log
 {
     private Logger[] loggers;
@@ -118,7 +120,9 @@ struct Log
         {
             static if (!level.disabled)
                 if (level & levels)
-                    _append(level, file, line, format!fmt(args));
+                    _append(
+                        level, file, line,
+                        (scope SinkDg sink) { sink.formattedWrite!fmt(args); });
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, Char, A...)
@@ -126,7 +130,9 @@ struct Log
         {
             static if (!level.disabled)
                 if (level & levels)
-                    _append(level, file, line, format(fmt, args));
+                    _append(
+                        level, file, line,
+                        (scope SinkDg sink) { sink.formattedWrite(fmt, args); });
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A)
@@ -134,11 +140,14 @@ struct Log
         {
             static if (!level.disabled)
                 if (level & levels)
-                    _append(level, file, line, arg.to!string);
+                    _append(
+                        level, file, line,
+                        (scope SinkDg sink) { sink(arg.to!string); });
         }
     }
 
-    private void _append(LogLevel level, string file, size_t line, string message)
+    private void _append(
+        LogLevel level, string file, size_t line, scope void delegate(scope SinkDg sink) putSink)
     {
         LogEvent event;
 
@@ -146,11 +155,10 @@ struct Log
         event.level = level;
         event.file = file;
         event.line = line;
-        event.message = message;
 
         foreach (logger; loggers)
             if (level & logger.levels)
-                logger.append(event);
+                logger.append(event, putSink);
     }
 }
 
@@ -161,7 +169,7 @@ shared static this()
     log = Log(stderrLogger);
 }
 
-/// Represents a logging event.
+/// Represents information about a logging event.
 struct LogEvent
 {
     /// local _time of the event
@@ -172,8 +180,6 @@ struct LogEvent
     string file;
     /// _line number of the event source
     size_t line;
-    /// supplied _message
-    string message;
 }
 
 auto fileLogger(alias Layout = layout)
@@ -245,12 +251,16 @@ abstract class Logger
         this.levels = levels;
     }
 
-    abstract void append(ref LogEvent event);
+    abstract void append(
+        const ref LogEvent event, scope void delegate(scope SinkDg sink) putSink);
 }
 
 class FileLogger(alias Layout) : Logger
 {
     private File file;
+
+    // must be static to be threadlocal
+    private static Appender!(char[]) buffer;
 
     this(string name, uint levels = LogLevel.info.orAbove)
     {
@@ -264,9 +274,25 @@ class FileLogger(alias Layout) : Logger
         this.file = file;
     }
 
-    override void append(ref LogEvent event)
+    override void append(
+        const ref LogEvent event, scope void delegate(scope SinkDg sink) putSink)
     {
-        Layout(this.file.lockingTextWriter, event);
+        import std.algorithm.mutation : swap;
+
+        // avoid problems if toString functions call log - "borrow" static buffer
+        Appender!(char[]) buffer;
+
+        buffer.swap(this.buffer);
+
+        // put it back on exit, so the next call can use it
+        scope(exit)
+        {
+            buffer.clear;
+            buffer.swap(this.buffer);
+        }
+
+        Layout(buffer, event, putSink);
+        this.file.lockingTextWriter.put(buffer.data);
         this.file.flush;
     }
 }
@@ -289,7 +315,8 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
         super(names[0], levels);
     }
 
-    override void append(ref LogEvent event)
+    override void append(
+        const ref LogEvent event, scope void delegate(scope SinkDg sink) putSink)
     {
         synchronized (this)
         {
@@ -297,7 +324,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
             {
                 roll;
             }
-            super.append(event);
+            super.append(event, putSink);
         }
     }
 
@@ -346,7 +373,8 @@ version (Posix)
             enforce(signal(SIGHUP, &hangup) !is SIG_ERR);
         }
 
-        override void append(ref LogEvent event)
+        override void append(
+            const ref LogEvent event, scope void delegate(scope SinkDg sink) putSink)
         {
             import core.atomic : atomicLoad;
 
@@ -359,7 +387,7 @@ version (Posix)
                     reopen;
                     this.count = count;
                 }
-                super.append(event);
+                super.append(event, putSink);
             }
         }
 
@@ -402,11 +430,12 @@ version (Posix)
             openlog(identifier.empty ? null : identifier.toStringz, 0, LOG_USER);
         }
 
-        override void append(ref LogEvent event)
+        override void append(
+            const ref LogEvent event, scope void delegate(scope SinkDg sink) putSink)
         {
             auto writer = appender!string;
 
-            Layout(writer, event);
+            Layout(writer, event, putSink);
             writer.put('\0');
             syslog(priority(event.level), "%s", writer.data.ptr);
         }
@@ -429,20 +458,25 @@ version (Posix)
         }
     }
 
-    void syslogLayout(Writer)(Writer writer, ref LogEvent event)
+    void syslogLayout(Writer)(
+        ref Writer writer,
+        const ref LogEvent event,
+        scope void delegate(scope SinkDg sink) putSink)
     {
-        writer.put(event.message);
+        putSink((const(char)[] fragment) { writer.put(fragment); });
     }
 }
 
 // Time Thread Category Context layout
-void layout(Writer)(Writer writer, ref LogEvent event)
+void layout(Writer)(
+    ref Writer writer, const ref LogEvent event, scope void delegate(scope SinkDg sink) putSink)
 {
     import core.thread : Thread;
 
     with (event)
     {
-        writer.formattedWrite!"%s %-5s %s:%s"(time._toISOExtString, level, file, line);
+        time._toISOExtString(writer);
+        writer.formattedWrite!" %-5s %s:%s"(level, file, line);
 
         if (Thread thread = Thread.getThis)
         {
@@ -453,7 +487,7 @@ void layout(Writer)(Writer writer, ref LogEvent event)
         }
 
         writer.put(' ');
-        writer.put(message);
+        putSink((const(char)[] fragment) { writer.put(fragment); });
         writer.put('\n');
     }
 }
@@ -466,21 +500,21 @@ unittest
     event.level = LogLevel.error;
     event.file = "log.d";
     event.line = 42;
-    event.message = "don't panic";
 
     auto writer = appender!string;
 
-    layout(writer, event);
+    layout(writer, event, (scope SinkDg sink) => sink("don't panic"));
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
 // SysTime.toISOExtString has no fixed length and no time-zone offset for local time
-private string _toISOExtString(SysTime time)
+private void _toISOExtString(W)(SysTime time, ref W writer)
+if (isOutputRange!(W, char))
 {
-    return format!"%s.%03d%s"(
-        (cast (DateTime) time).toISOExtString,
-        time.fracSecs.total!"msecs",
-        time.utcOffset._toISOString);
+    (cast (DateTime) time).toISOExtString(writer);
+
+    writer.formattedWrite!".%03d"(time.fracSecs.total!"msecs");
+    time.utcOffset._toISOString(writer);
 }
 
 unittest
@@ -489,23 +523,37 @@ unittest
     auto fracSecs = 123_456.usecs;
     auto timeZone =  new immutable SimpleTimeZone(1.hours);
     auto time = SysTime(dateTime, fracSecs, timeZone);
+    auto writer = appender!string;
 
-    assert(time._toISOExtString == "2003-02-01T12:00:00.123+01:00");
+    time._toISOExtString(writer);
+
+    assert(writer.data == "2003-02-01T12:00:00.123+01:00");
 }
 
 // SimpleTimeZone.toISOString is private
 @safe
-private string _toISOString(Duration offset) pure
+private void _toISOString(W)(Duration offset, ref W writer)
+if (isOutputRange!(W, char))
 {
     uint hours;
     uint minutes;
 
     abs(offset).split!("hours", "minutes")(hours, minutes);
-    return format!"%s%02d:%02d"(offset.isNegative ? '-' : '+', hours, minutes);
+    writer.formattedWrite!"%s%02d:%02d"(offset.isNegative ? '-' : '+', hours, minutes);
 }
 
 unittest
 {
-    assert(_toISOString(90.minutes) == "+01:30");
-    assert(_toISOString(-90.minutes) == "-01:30");
+    auto writer = appender!string;
+
+    90.minutes._toISOString(writer);
+    assert(writer.data == "+01:30");
+}
+
+unittest
+{
+    auto writer = appender!string;
+
+    (-90).minutes._toISOString(writer);
+    assert(writer.data == "-01:30");
 }
