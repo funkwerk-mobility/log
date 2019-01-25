@@ -496,7 +496,7 @@ unittest
     eventInfo.file = "log.d";
     eventInfo.line = 42;
 
-    auto putMessage = (scope Sink sink) => sink("don't panic");
+    alias putMessage = (scope Sink sink) => sink("don't panic");
     auto writer = appender!string;
 
     layout(writer, eventInfo, putMessage);
