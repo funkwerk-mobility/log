@@ -496,10 +496,9 @@ unittest
     eventInfo.file = "log.d";
     eventInfo.line = 42;
 
-    alias putMessage = (scope Sink sink) => sink("don't panic");
     auto writer = appender!string;
 
-    layout(writer, eventInfo, putMessage);
+    layout(writer, eventInfo, (scope Sink sink) { sink("don't panic"); });
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
