@@ -14,6 +14,7 @@ import std.range;
 import std.stdio;
 import std.string;
 import std.traits;
+import std.typecons;
 
 /// Defines the importance of a log message.
 enum LogLevel
@@ -102,6 +103,20 @@ struct Log
     {
         this.loggers = loggers.dup;
         levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
+    }
+
+    public Nullable!int fileHandle() const @nogc nothrow @safe
+    {
+        foreach (logger; loggers)
+        {
+            auto handle = logger.fileHandle();
+
+            if (!handle.isNull)
+            {
+                return handle;
+            }
+        }
+        return Nullable!int();
     }
 
     alias trace = append!(LogLevel.trace);
@@ -250,6 +265,16 @@ abstract class Logger
 
     abstract void append(const ref EventInfo eventInfo,
         scope void delegate(scope Sink sink) putMessage);
+
+    // exposed so that user code can write data to the log file directly in
+    // emergency situations, such as crashes.
+    // Returns null if the logger does not use straightforward file handles.
+    // The effect of writing to the returned handle should be some form of
+    // readable logging.
+    Nullable!int fileHandle() const @nogc nothrow @safe
+    {
+        return Nullable!int();
+    }
 }
 
 class FileLogger(alias Layout) : Logger
@@ -259,16 +284,21 @@ class FileLogger(alias Layout) : Logger
     // must be static to be thread-local
     private static Appender!(char[]) buffer;
 
+    // store cause it's awkward to derive in fileHandle, which must be signalsafe
+    private int fileno_;
+
     this(string name, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         file = File(name, "ab");
+        fileno_ = file.fileno;
     }
 
     this(File file, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         this.file = file;
+        fileno_ = file.fileno;
     }
 
     override void append(const ref EventInfo eventInfo,
@@ -291,6 +321,11 @@ class FileLogger(alias Layout) : Logger
         Layout(buffer, eventInfo, putMessage);
         this.file.lockingTextWriter.put(buffer.data);
         this.file.flush;
+    }
+
+    override Nullable!int fileHandle() const @nogc nothrow @safe
+    {
+        return Nullable!int(this.fileno_);
     }
 }
 
@@ -337,6 +372,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
                 rename(source, destination);
         }
         file.open(names[0], "wb");
+        fileno_ = file.fileno;
     }
 }
 
@@ -394,6 +430,7 @@ version (Posix)
             {
                 file.close;
                 file.open(file.name, "ab");
+                fileno_ = file.fileno;
             }
         }
     }
