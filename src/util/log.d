@@ -92,6 +92,9 @@ struct Log
 {
     private Logger[] loggers;
 
+    // preallocate so we can fill it in @nogc fileDescriptors()
+    private int[] fileDescriptorBuffer;
+
     private uint levels;
 
     this(Logger[] loggers ...)
@@ -102,21 +105,25 @@ struct Log
     body
     {
         this.loggers = loggers.dup;
+        this.fileDescriptorBuffer = new int[this.loggers.length];
         levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
     }
 
-    public Nullable!int fileHandle() const @nogc nothrow @safe
+    public int[] fileDescriptors() @nogc nothrow @safe
+    in (this.fileDescriptorBuffer.length >= this.loggers.length)
     {
+        size_t length = 0;
+
         foreach (logger; loggers)
         {
-            auto handle = logger.fileHandle();
+            auto handle = logger.fileDescriptor();
 
             if (!handle.isNull)
             {
-                return handle;
+                this.fileDescriptorBuffer[length++] = handle.get;
             }
         }
-        return Nullable!int();
+        return this.fileDescriptorBuffer[0 .. length];
     }
 
     alias trace = append!(LogLevel.trace);
@@ -271,7 +278,7 @@ abstract class Logger
     // Returns null if the logger does not use straightforward file handles.
     // The effect of writing to the returned handle should be some form of
     // readable logging.
-    Nullable!int fileHandle() const @nogc nothrow @safe
+    Nullable!int fileDescriptor() const @nogc nothrow @safe
     {
         return Nullable!int();
     }
@@ -323,7 +330,7 @@ class FileLogger(alias Layout) : Logger
         this.file.flush;
     }
 
-    override Nullable!int fileHandle() const @nogc nothrow @safe
+    override Nullable!int fileDescriptor() const @nogc nothrow @safe
     {
         return Nullable!int(this.fileno_);
     }
