@@ -1,4 +1,4 @@
-//          Copyright Mario Kröplin 2018.
+//          Copyright Mario Kröplin 2019.
 // Distributed under the Boost Software License, Version 1.0.
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
@@ -93,7 +93,7 @@ struct Log
     private Logger[] loggers;
 
     // preallocate so we can fill it in @nogc fileDescriptors()
-    private int[] fileDescriptorBuffer;
+    private int[] buffer;
 
     private uint levels;
 
@@ -105,25 +105,23 @@ struct Log
     body
     {
         this.loggers = loggers.dup;
-        this.fileDescriptorBuffer = new int[this.loggers.length];
+        buffer = new int[this.loggers.length];
         levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
     }
 
     public int[] fileDescriptors() @nogc nothrow @safe
-    in (this.fileDescriptorBuffer.length >= this.loggers.length)
+    in (buffer.length >= loggers.length)
     {
         size_t length = 0;
 
         foreach (logger; loggers)
         {
-            auto handle = logger.fileDescriptor();
+            const fileDescriptor = logger.fileDescriptor;
 
-            if (!handle.isNull)
-            {
-                this.fileDescriptorBuffer[length++] = handle.get;
-            }
+            if (!fileDescriptor.isNull)
+                buffer[length++] = fileDescriptor.get;
         }
-        return this.fileDescriptorBuffer[0 .. length];
+        return buffer[0 .. length];
     }
 
     alias trace = append!(LogLevel.trace);
@@ -147,7 +145,7 @@ struct Log
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, Char, A...)
-            (in Char[] fmt, lazy A args)
+            (const Char[] fmt, lazy A args)
         {
             static if (!level.disabled)
                 if (level & levels)
@@ -273,9 +271,9 @@ abstract class Logger
     abstract void append(const ref EventInfo eventInfo,
         scope void delegate(scope Sink sink) putMessage);
 
-    // exposed so that user code can write data to the log file directly in
-    // emergency situations, such as crashes.
-    // Returns null if the logger does not use straightforward file handles.
+    // Exposed so that client code can write data to the log file directly in
+    // emergency situations, such as a crash.
+    // Returns null if the logger does not use a straightforward file descriptor.
     // The effect of writing to the returned handle should be some form of
     // readable logging.
     Nullable!int fileDescriptor() const @nogc nothrow @safe
@@ -286,26 +284,26 @@ abstract class Logger
 
 class FileLogger(alias Layout) : Logger
 {
-    private File file;
-
     // must be static to be thread-local
     private static Appender!(char[]) buffer;
 
-    // store cause it's awkward to derive in fileHandle, which must be signalsafe
-    private int fileno_;
+    private File file;
+
+    // store cause it's awkward to derive in fileDescriptor, which must be signal-safe
+    private int fileno;
 
     this(string name, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         file = File(name, "ab");
-        fileno_ = file.fileno;
+        fileno = file.fileno;
     }
 
     this(File file, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         this.file = file;
-        fileno_ = file.fileno;
+        fileno = this.file.fileno;
     }
 
     override void append(const ref EventInfo eventInfo,
@@ -326,13 +324,13 @@ class FileLogger(alias Layout) : Logger
         }
 
         Layout(buffer, eventInfo, putMessage);
-        this.file.lockingTextWriter.put(buffer.data);
-        this.file.flush;
+        file.lockingTextWriter.put(buffer.data);
+        file.flush;
     }
 
     override Nullable!int fileDescriptor() const @nogc nothrow @safe
     {
-        return Nullable!int(this.fileno_);
+        return Nullable!int(fileno);
     }
 }
 
@@ -342,7 +340,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
     private size_t size;
 
-    this(in string[] names, size_t size, uint levels = LogLevel.info.orAbove)
+    this(const string[] names, size_t size, uint levels = LogLevel.info.orAbove)
     in
     {
         assert(!names.empty);
@@ -351,7 +349,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
     {
         this.names = names.dup;
         this.size = size;
-        super(names[0], levels);
+        super(this.names.front, levels);
     }
 
     override void append(const ref EventInfo eventInfo,
@@ -360,9 +358,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
         synchronized (this)
         {
             if (file.size >= size)
-            {
                 roll;
-            }
             super.append(eventInfo, putMessage);
         }
     }
@@ -373,13 +369,13 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
 
         foreach_reverse (i, destination; names[1 .. $])
         {
-            string source = names[i];
+            const source = names[i];
 
             if (source.exists)
                 rename(source, destination);
         }
-        file.open(names[0], "wb");
-        fileno_ = file.fileno;
+        file.open(names.front, "wb");
+        fileno = file.fileno;
     }
 }
 
@@ -437,7 +433,7 @@ version (Posix)
             {
                 file.close;
                 file.open(file.name, "ab");
-                fileno_ = file.fileno;
+                fileno = file.fileno;
             }
         }
     }
