@@ -14,6 +14,7 @@ import std.range;
 import std.stdio;
 import std.string;
 import std.traits;
+import std.typecons;
 
 /// Defines the importance of a log message.
 enum LogLevel
@@ -91,6 +92,9 @@ struct Log
 {
     private Logger[] loggers;
 
+    // preallocate so we can fill it in @nogc fileDescriptors()
+    private int[] fileDescriptorBuffer;
+
     private uint levels;
 
     this(Logger[] loggers ...)
@@ -101,7 +105,25 @@ struct Log
     body
     {
         this.loggers = loggers.dup;
+        this.fileDescriptorBuffer = new int[this.loggers.length];
         levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
+    }
+
+    public int[] fileDescriptors() @nogc nothrow @safe
+    in (this.fileDescriptorBuffer.length >= this.loggers.length)
+    {
+        size_t length = 0;
+
+        foreach (logger; loggers)
+        {
+            auto handle = logger.fileDescriptor();
+
+            if (!handle.isNull)
+            {
+                this.fileDescriptorBuffer[length++] = handle.get;
+            }
+        }
+        return this.fileDescriptorBuffer[0 .. length];
     }
 
     alias trace = append!(LogLevel.trace);
@@ -250,6 +272,16 @@ abstract class Logger
 
     abstract void append(const ref EventInfo eventInfo,
         scope void delegate(scope Sink sink) putMessage);
+
+    // exposed so that user code can write data to the log file directly in
+    // emergency situations, such as crashes.
+    // Returns null if the logger does not use straightforward file handles.
+    // The effect of writing to the returned handle should be some form of
+    // readable logging.
+    Nullable!int fileDescriptor() const @nogc nothrow @safe
+    {
+        return Nullable!int();
+    }
 }
 
 class FileLogger(alias Layout) : Logger
@@ -259,16 +291,21 @@ class FileLogger(alias Layout) : Logger
     // must be static to be thread-local
     private static Appender!(char[]) buffer;
 
+    // store cause it's awkward to derive in fileHandle, which must be signalsafe
+    private int fileno_;
+
     this(string name, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         file = File(name, "ab");
+        fileno_ = file.fileno;
     }
 
     this(File file, uint levels = LogLevel.info.orAbove)
     {
         super(levels);
         this.file = file;
+        fileno_ = file.fileno;
     }
 
     override void append(const ref EventInfo eventInfo,
@@ -291,6 +328,11 @@ class FileLogger(alias Layout) : Logger
         Layout(buffer, eventInfo, putMessage);
         this.file.lockingTextWriter.put(buffer.data);
         this.file.flush;
+    }
+
+    override Nullable!int fileDescriptor() const @nogc nothrow @safe
+    {
+        return Nullable!int(this.fileno_);
     }
 }
 
@@ -337,6 +379,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
                 rename(source, destination);
         }
         file.open(names[0], "wb");
+        fileno_ = file.fileno;
     }
 }
 
@@ -394,6 +437,7 @@ version (Posix)
             {
                 file.close;
                 file.open(file.name, "ab");
+                fileno_ = file.fileno;
             }
         }
     }
