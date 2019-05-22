@@ -86,7 +86,7 @@ bool disabled(LogLevel level) pure
     return (level & levels) != 0;
 }
 
-private alias Sink = void delegate(const(char)[]);
+private alias Sink = OutputRange!(const(char)[]);
 
 struct Log
 {
@@ -159,7 +159,7 @@ struct Log
             static if (!level.disabled)
                 if (level & levels)
                     _append(level, file, line,
-                        (scope Sink sink) { sink(arg.to!string); });
+                        (scope Sink sink) { sink.put(arg.to!string); });
         }
     }
 
@@ -522,7 +522,7 @@ void layout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
         }
 
         writer.put(' ');
-        putMessage((const(char)[] s) { writer.put(s); });
+        putMessage(outputRangeObject!(const(char)[])(writer));
         writer.put('\n');
     }
 }
@@ -538,7 +538,7 @@ unittest
 
     auto writer = appender!string;
 
-    layout(writer, eventInfo, (scope Sink sink) { sink("don't panic"); });
+    layout(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
