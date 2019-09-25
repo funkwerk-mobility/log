@@ -287,6 +287,9 @@ class FileLogger(alias Layout) : Logger
     // must be static to be thread-local
     private static Appender!(char[]) buffer;
 
+    // paired to this.buffer
+    private static OutputRange!(const(char)[]) outputRange;
+
     private File file;
 
     // store cause it's awkward to derive in fileDescriptor, which must be signal-safe
@@ -313,17 +316,20 @@ class FileLogger(alias Layout) : Logger
 
         // avoid problems if toString functions call log - "borrow" static buffer
         Appender!(char[]) buffer;
+        OutputRange!(const(char)[]) outputRange = outputRangeObject!(const(char)[])(buffer);
 
         buffer.swap(this.buffer);
+        outputRange.swap(this.outputRange);
 
         // put it back on exit, so the next call can use it
         scope(exit)
         {
             buffer.clear;
             buffer.swap(this.buffer);
+            outputRange.swap(this.outputRange);
         }
 
-        Layout(buffer, eventInfo, putMessage);
+        Layout(outputRange, eventInfo, putMessage);
         file.lockingTextWriter.put(buffer.data);
         file.flush;
     }
@@ -503,27 +509,27 @@ version (Posix)
 }
 
 // Time Thread Category Context layout
-void layout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
+void layout(scope Sink sink, const ref EventInfo eventInfo,
     scope void delegate(scope Sink sink) putMessage)
 {
     import core.thread : Thread;
 
     with (eventInfo)
     {
-        time._toISOExtString(writer);
-        writer.formattedWrite!" %-5s %s:%s"(level, file, line);
+        time._toISOExtString(sink);
+        sink.formattedWrite!" %-5s %s:%s"(level, file, line);
 
         if (Thread thread = Thread.getThis)
         {
             string name = thread.name;
 
             if (!name.empty)
-                writer.formattedWrite!" [%s]"(name);
+                sink.formattedWrite!" [%s]"(name);
         }
 
-        writer.put(' ');
-        putMessage(outputRangeObject!(const(char)[])(writer));
-        writer.put('\n');
+        sink.put(" ");
+        putMessage(sink);
+        sink.put("\n");
     }
 }
 
@@ -537,8 +543,9 @@ unittest
     eventInfo.line = 42;
 
     auto writer = appender!string;
+    auto outputRange = outputRangeObject!(const(char)[])(writer);
 
-    layout(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
+    layout(outputRange, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
@@ -564,7 +571,6 @@ unittest
 }
 
 // SimpleTimeZone.toISOString is private
-@safe
 private void _toISOString(W)(Duration offset, ref W writer)
 if (isOutputRange!(W, char))
 {
