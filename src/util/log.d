@@ -10,6 +10,7 @@ import std.array;
 import std.conv;
 import std.datetime;
 import std.format;
+import std.meta;
 import std.range;
 import std.stdio;
 import std.string;
@@ -86,11 +87,12 @@ bool disabled(LogLevel level) pure
     return (level & levels) != 0;
 }
 
-private alias Sink = OutputRange!(const(char)[]);
-
 struct Log
 {
     private Logger[] loggers;
+
+    private alias TypedLoggers(T) = TypedLogger!T[];
+    private staticMap!(TypedLoggers, SupportedSinks) typedLoggers;
 
     // preallocate so we can fill it in @nogc fileDescriptors()
     private int[] buffer;
@@ -107,6 +109,10 @@ struct Log
         this.loggers = loggers.dup;
         buffer = new int[this.loggers.length];
         levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
+        static foreach (i, T; SupportedSinks)
+        {
+            typedLoggers[i] = loggers.map!(a => cast(TypedLogger!T) a).filter!(a => a !is null).array;
+        }
     }
 
     public int[] fileDescriptors() @nogc nothrow @safe
@@ -140,8 +146,7 @@ struct Log
         {
             static if (!level.disabled)
                 if (level & levels)
-                    _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite!fmt(args); });
+                    _append!((ref sink) { sink.formattedWrite!fmt(args); })(level, file, line);
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, Char, A...)
@@ -149,8 +154,7 @@ struct Log
         {
             static if (!level.disabled)
                 if (level & levels)
-                    _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite(fmt, args); });
+                    _append!((ref sink) { sink.formattedWrite(fmt, args); })(level, file, line);
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A)
@@ -158,28 +162,35 @@ struct Log
         {
             static if (!level.disabled)
                 if (level & levels)
-                    _append(level, file, line,
-                        (scope Sink sink) { sink.put(arg.to!string); });
+                    _append!((ref sink) { sink.put(arg.to!string); })(level, file, line);
         }
-    }
-
-    private void _append(LogLevel level, string file, size_t line,
-        scope void delegate(scope Sink sink) putMessage)
-    {
-        EventInfo eventInfo;
-
-        eventInfo.time = Clock.currTime;
-        eventInfo.level = level;
-        eventInfo.file = file;
-        eventInfo.line = line;
-
-        foreach (logger; loggers)
-            if (level & logger.levels)
-                logger.append(eventInfo, putMessage);
     }
 }
 
 __gshared Log log;
+
+private alias SupportedSinks = AliasSeq!(Appender!string, BufferedTextWriter!(File.LockingTextWriter));
+
+private void _append(alias put)(LogLevel level, string file, size_t line)
+{
+    EventInfo eventInfo;
+
+    eventInfo.time = Clock.currTime;
+    eventInfo.level = level;
+    eventInfo.file = file;
+    eventInfo.line = line;
+
+    static foreach (i, T; SupportedSinks)
+    {
+        foreach (typedLogger; log.typedLoggers[i])
+        {
+            if (level & typedLogger.levels)
+            {
+                typedLogger.append(eventInfo, put!T);
+            }
+        }
+    }
+}
 
 shared static this()
 {
@@ -259,6 +270,12 @@ unittest
     assert(10.archiveFiles("log").endsWith("log-10"));
 }
 
+unittest
+{
+    log.info("Hello World %s", 1);
+    log.info!"Hello World %s"(2);
+}
+
 abstract class Logger
 {
     private uint levels;
@@ -267,9 +284,6 @@ abstract class Logger
     {
         this.levels = levels;
     }
-
-    abstract void append(const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage);
 
     // Exposed so that client code can write data to the log file directly in
     // emergency situations, such as a crash.
@@ -282,11 +296,24 @@ abstract class Logger
     }
 }
 
-class FileLogger(alias Layout) : Logger
+abstract class TypedLogger(Sink_) : Logger
+if (isSupportedSink!Sink_)
 {
-    // must be static to be thread-local
-    private static Appender!(char[]) buffer;
+    protected alias Sink = Sink_;
 
+    this(uint levels)
+    {
+        super(levels);
+    }
+
+    abstract void append(const ref EventInfo eventInfo,
+        scope void delegate(ref Sink sink) putMessage);
+}
+
+private enum bool isSupportedSink(T) = anySatisfy!(ApplyLeft!(allSameType!T), SupportedSinks);
+
+class FileLogger(alias Layout) : TypedLogger!(BufferedTextWriter!(File.LockingTextWriter))
+{
     private File file;
 
     // store cause it's awkward to derive in fileDescriptor, which must be signal-safe
@@ -307,24 +334,12 @@ class FileLogger(alias Layout) : Logger
     }
 
     override void append(const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+        scope void delegate(ref Sink sink) putMessage)
     {
-        import std.algorithm.mutation : swap;
+        auto sink = Sink(file.lockingTextWriter);
 
-        // avoid problems if toString functions call log - "borrow" static buffer
-        Appender!(char[]) buffer;
-
-        buffer.swap(this.buffer);
-
-        // put it back on exit, so the next call can use it
-        scope(exit)
-        {
-            buffer.clear;
-            buffer.swap(this.buffer);
-        }
-
-        Layout(buffer, eventInfo, putMessage);
-        file.lockingTextWriter.put(buffer.data);
+        Layout(sink, eventInfo, putMessage);
+        sink.flush;
         file.flush;
     }
 
@@ -353,7 +368,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
     }
 
     override void append(const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+        scope void delegate(ref Sink sink) putMessage)
     {
         synchronized (this)
         {
@@ -410,7 +425,7 @@ version (Posix)
         }
 
         override void append(const ref EventInfo eventInfo,
-            scope void delegate(scope Sink sink) putMessage)
+            scope void delegate(ref Sink sink) putMessage)
         {
             import core.atomic : atomicLoad;
 
@@ -445,7 +460,7 @@ version (Posix)
 
     private extern (C) void syslog(int priority, const char *format, ...);
 
-    class SyslogLogger(alias Layout) : Logger
+    class SyslogLogger(alias Layout) : TypedLogger!(Appender!string)
     {
         enum SyslogLevel
         {
@@ -468,7 +483,7 @@ version (Posix)
         }
 
         override void append(const ref EventInfo eventInfo,
-            scope void delegate(scope Sink sink) putMessage)
+            scope void delegate(ref Sink sink) putMessage)
         {
             auto writer = appender!string;
 
@@ -496,15 +511,15 @@ version (Posix)
     }
 
     void syslogLayout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+        scope void delegate(ref Writer sink) putMessage)
     {
-        putMessage((const(char)[] s) { writer.put(s); });
+        putMessage(writer);
     }
 }
 
 // Time Thread Category Context layout
 void layout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
-    scope void delegate(scope Sink sink) putMessage)
+    scope void delegate(ref Writer writer) putMessage)
 {
     import core.thread : Thread;
 
@@ -521,9 +536,9 @@ void layout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
                 writer.formattedWrite!" [%s]"(name);
         }
 
-        writer.put(' ');
-        putMessage(outputRangeObject!(const(char)[])(writer));
-        writer.put('\n');
+        writer.put(" ");
+        putMessage(writer);
+        writer.put("\n");
     }
 }
 
@@ -538,7 +553,9 @@ unittest
 
     auto writer = appender!string;
 
-    layout(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
+    layout(writer, eventInfo, (ref Appender!string writer) {
+        writer.put("don't panic");
+    });
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
@@ -564,8 +581,8 @@ unittest
 }
 
 // SimpleTimeZone.toISOString is private
-@safe
 private void _toISOString(W)(Duration offset, ref W writer)
+@safe
 if (isOutputRange!(W, char))
 {
     uint hours;
@@ -589,4 +606,38 @@ unittest
 
     (-90).minutes._toISOString(writer);
     assert(writer.data == "-01:30");
+}
+
+// avoid producing too many small file writes
+private struct BufferedTextWriter(T)
+if (isOutputRange!(T, char))
+{
+    private T backingWriter;
+
+    private char[1024] buffer = void;
+
+    private size_t used = 0;
+
+    invariant(this.used <= this.buffer.length);
+
+    public void put(const(char)[] data)
+    {
+        if (this.used + data.length > this.buffer.length)
+        {
+            flush;
+            if (this.used + data.length > this.buffer.length)
+            {
+                this.backingWriter.put(data);
+                return;
+            }
+        }
+        this.buffer[this.used .. this.used + data.length] = data;
+        this.used += data.length;
+    }
+
+    public void flush()
+    {
+        this.backingWriter.put(this.buffer[0 .. this.used]);
+        this.used = 0;
+    }
 }
