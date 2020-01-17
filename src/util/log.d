@@ -139,27 +139,47 @@ struct Log
         if (isSomeString!(typeof(fmt)))
         {
             static if (!level.disabled)
+            {
                 if (level & levels)
+                {
+                    A evaluatedArgs = args;
+
                     _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite!fmt(args); });
+                        (scope Sink sink) { sink.formattedWrite!fmt(evaluatedArgs); });
+                }
+            }
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, Char, A...)
             (const Char[] fmt, lazy A args)
         {
+
             static if (!level.disabled)
+            {
                 if (level & levels)
+                {
+                    A evaluatedArgs = args;
+
                     _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite(fmt, args); });
+                        (scope Sink sink) { sink.formattedWrite(fmt, evaluatedArgs); });
+                }
+            }
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A)
             (lazy A arg)
         {
+
             static if (!level.disabled)
+            {
                 if (level & levels)
+                {
+                    A evaluatedArg = arg;
+
                     _append(level, file, line,
-                        (scope Sink sink) { sink.put(arg.to!string); });
+                        (scope Sink sink) { sink.put(evaluatedArg.to!string); });
+                }
+            }
         }
     }
 
