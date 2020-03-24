@@ -498,7 +498,7 @@ version (Posix)
     void syslogLayout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
         scope void delegate(scope Sink sink) putMessage)
     {
-        putMessage((const(char)[] s) { writer.put(s); });
+        putMessage(outputRangeObject!(const(char)[])(writer));
     }
 }
 
