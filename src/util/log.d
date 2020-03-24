@@ -282,11 +282,29 @@ abstract class Logger
     }
 }
 
+struct ReusableAppender
+{
+    import std.algorithm.mutation : swap;
+
+    // threadlocal output buffer
+    private static Appender!(char[]) appender;
+
+    public static Appender!(char[]) use()
+    {
+        Appender!(char[]) appender;
+        ReusableAppender.appender.swap(appender);
+        return appender;
+    }
+
+    public static void release(Appender!(char[]) appender)
+    {
+        appender.clear;
+        ReusableAppender.appender.swap(appender);
+    }
+}
+
 class FileLogger(alias Layout) : Logger
 {
-    // must be static to be thread-local
-    private static Appender!(char[]) buffer;
-
     private File file;
 
     // store cause it's awkward to derive in fileDescriptor, which must be signal-safe
@@ -309,22 +327,12 @@ class FileLogger(alias Layout) : Logger
     override void append(const ref EventInfo eventInfo,
         scope void delegate(ref Sink sink) putMessage)
     {
-        import std.algorithm.mutation : swap;
+        auto appender = ReusableAppender.use;
 
-        // avoid problems if toString functions call log - "borrow" static buffer
-        Appender!(char[]) buffer;
+        scope(exit) ReusableAppender.release(appender);
 
-        buffer.swap(this.buffer);
-
-        // put it back on exit, so the next call can use it
-        scope(exit)
-        {
-            buffer.clear;
-            buffer.swap(this.buffer);
-        }
-
-        Layout(buffer, eventInfo, putMessage);
-        file.lockingTextWriter.put(buffer.data);
+        Layout(appender, eventInfo, putMessage);
+        file.lockingTextWriter.put(appender.data);
         file.flush;
     }
 
@@ -470,7 +478,9 @@ version (Posix)
         override void append(const ref EventInfo eventInfo,
             scope void delegate(ref Sink sink) putMessage)
         {
-            auto appender = appender!(char[]);
+            auto appender = ReusableAppender.use;
+
+            scope(exit) ReusableAppender.release(appender);
 
             Layout(appender, eventInfo, putMessage);
             appender.put('\0');
