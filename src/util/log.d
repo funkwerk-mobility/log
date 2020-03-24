@@ -86,7 +86,7 @@ bool disabled(LogLevel level) pure
     return (level & levels) != 0;
 }
 
-private alias Sink = OutputRange!(const(char)[]);
+private alias Sink = Appender!(char[]);
 
 struct Log
 {
@@ -141,7 +141,7 @@ struct Log
             static if (!level.disabled)
                 if (level & levels)
                     _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite!fmt(args); });
+                        (ref Sink sink) { sink.formattedWrite!fmt(args); });
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, Char, A...)
@@ -150,7 +150,7 @@ struct Log
             static if (!level.disabled)
                 if (level & levels)
                     _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite(fmt, args); });
+                        (ref Sink sink) { sink.formattedWrite(fmt, args); });
         }
 
         void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A)
@@ -159,12 +159,12 @@ struct Log
             static if (!level.disabled)
                 if (level & levels)
                     _append(level, file, line,
-                        (scope Sink sink) { sink.put(arg.to!string); });
+                        (ref Sink sink) { sink.put(arg.to!string); });
         }
     }
 
     private void _append(LogLevel level, string file, size_t line,
-        scope void delegate(scope Sink sink) putMessage)
+        scope void delegate(ref Sink sink) putMessage)
     {
         EventInfo eventInfo;
 
@@ -269,7 +269,7 @@ abstract class Logger
     }
 
     abstract void append(const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage);
+        scope void delegate(ref Sink sink) putMessage);
 
     // Exposed so that client code can write data to the log file directly in
     // emergency situations, such as a crash.
@@ -307,7 +307,7 @@ class FileLogger(alias Layout) : Logger
     }
 
     override void append(const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+        scope void delegate(ref Sink sink) putMessage)
     {
         import std.algorithm.mutation : swap;
 
@@ -353,7 +353,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
     }
 
     override void append(const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+        scope void delegate(ref Sink sink) putMessage)
     {
         synchronized (this)
         {
@@ -410,7 +410,7 @@ version (Posix)
         }
 
         override void append(const ref EventInfo eventInfo,
-            scope void delegate(scope Sink sink) putMessage)
+            scope void delegate(ref Sink sink) putMessage)
         {
             import core.atomic : atomicLoad;
 
@@ -468,13 +468,13 @@ version (Posix)
         }
 
         override void append(const ref EventInfo eventInfo,
-            scope void delegate(scope Sink sink) putMessage)
+            scope void delegate(ref Sink sink) putMessage)
         {
-            auto writer = appender!string;
+            auto appender = appender!(char[]);
 
-            Layout(writer, eventInfo, putMessage);
-            writer.put('\0');
-            syslog(priority(eventInfo.level), "%s", writer.data.ptr);
+            Layout(appender, eventInfo, putMessage);
+            appender.put('\0');
+            syslog(priority(eventInfo.level), "%s", appender.data.ptr);
         }
 
         static SyslogLevel priority(LogLevel level) pure
@@ -495,35 +495,35 @@ version (Posix)
         }
     }
 
-    void syslogLayout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+    void syslogLayout(ref Sink sink, const ref EventInfo eventInfo,
+        scope void delegate(ref Sink sink) putMessage)
     {
-        putMessage(outputRangeObject!(const(char)[])(writer));
+        putMessage(sink);
     }
 }
 
 // Time Thread Category Context layout
-void layout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
-    scope void delegate(scope Sink sink) putMessage)
+void layout(ref Sink sink, const ref EventInfo eventInfo,
+    scope void delegate(ref Sink sink) putMessage)
 {
     import core.thread : Thread;
 
     with (eventInfo)
     {
-        time._toISOExtString(writer);
-        writer.formattedWrite!" %-5s %s:%s"(level, file, line);
+        time._toISOExtString(sink);
+        sink.formattedWrite!" %-5s %s:%s"(level, file, line);
 
         if (Thread thread = Thread.getThis)
         {
             string name = thread.name;
 
             if (!name.empty)
-                writer.formattedWrite!" [%s]"(name);
+                sink.formattedWrite!" [%s]"(name);
         }
 
-        writer.put(' ');
-        putMessage(outputRangeObject!(const(char)[])(writer));
-        writer.put('\n');
+        sink.put(' ');
+        putMessage(sink);
+        sink.put('\n');
     }
 }
 
@@ -536,9 +536,9 @@ unittest
     eventInfo.file = "log.d";
     eventInfo.line = 42;
 
-    auto writer = appender!string;
+    auto writer = appender!(char[]);
 
-    layout(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
+    layout(writer, eventInfo, (ref Sink sink) { sink.put("don't panic"); });
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
