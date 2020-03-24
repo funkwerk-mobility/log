@@ -542,6 +542,20 @@ unittest
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
+unittest
+{
+    // instantiate templates to check for compilation errors
+    if (false)
+    {
+        cast(void) rollingFileLogger("name", 10, 1024 * 1024);
+        version (Posix)
+        {
+            cast(void) rotatingFileLogger("name");
+            cast(void) syslogLogger;
+        }
+    }
+}
+
 // SysTime.toISOExtString has no fixed length and no time-zone offset for local time
 private void _toISOExtString(W)(SysTime time, ref W writer)
 if (isOutputRange!(W, char))
