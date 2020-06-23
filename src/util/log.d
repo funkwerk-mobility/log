@@ -300,6 +300,18 @@ abstract class Logger
     {
         return Nullable!int();
     }
+
+    /**
+     * Disable logging on this logger.
+     *
+     * In emergency situations, such as a crash, we don't want further logging "the normal way",
+     * we just want to gather and write our backtrace, and any more log statements would just obfuscate
+     * the cause of the crash.
+     */
+    void disable() @nogc nothrow @safe
+    {
+        this.levels = 0;
+    }
 }
 
 class FileLogger(alias Layout) : Logger
