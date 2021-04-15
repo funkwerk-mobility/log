@@ -98,11 +98,7 @@ struct Log
     private uint levels;
 
     this(Logger[] loggers ...)
-    in
-    {
-        assert(loggers.all!"a !is null");
-    }
-    body
+    in (loggers.all!"a !is null")
     {
         this.loggers = loggers.dup;
         buffer = new int[this.loggers.length];
@@ -361,11 +357,7 @@ class RollingFileLogger(alias Layout) : FileLogger!Layout
     private size_t size;
 
     this(const string[] names, size_t size, uint levels = LogLevel.info.orAbove)
-    in
-    {
-        assert(!names.empty);
-    }
-    body
+    in(!names.empty)
     {
         this.names = names.dup;
         this.size = size;
