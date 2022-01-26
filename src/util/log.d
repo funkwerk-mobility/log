@@ -11,6 +11,7 @@ import std.conv;
 import std.datetime;
 import std.format;
 import std.range;
+import std.socket;
 import std.stdio;
 import std.string;
 import std.traits;
@@ -239,6 +240,12 @@ auto rollingFileLogger(alias Layout = layout)
     return new RollingFileLogger!Layout(name ~ count.archiveFiles(name), size, levels);
 }
 
+auto tcpLogger(alias Layout = layout)
+    (string host, ushort port, uint levels = LogLevel.info.orAbove)
+{
+    return new TcpLogger!Layout(host, port, levels);
+}
+
 version (Posix)
     auto rotatingFileLogger(alias Layout = layout)
         (string name, uint levels = LogLevel.info.orAbove)
@@ -325,28 +332,101 @@ class FileLogger(alias Layout) : Logger
     override void append(const ref EventInfo eventInfo,
         scope void delegate(scope Sink sink) putMessage)
     {
-        import std.algorithm.mutation : swap;
+        // Handle reentrant calls by rolling back buffer position
+        const bufferStart = buffer[].length;
 
-        // avoid problems if toString functions call log - "borrow" static buffer
-        Appender!(char[]) buffer;
-
-        buffer.swap(this.buffer);
-
-        // put it back on exit, so the next call can use it
         scope(exit)
         {
-            buffer.clear;
-            buffer.swap(this.buffer);
+            buffer.shrinkTo(bufferStart);
         }
 
         Layout(buffer, eventInfo, putMessage);
-        file.lockingTextWriter.put(buffer.data);
+        file.lockingTextWriter.put(buffer[][bufferStart .. $]);
         file.flush;
     }
 
     override Nullable!int fileDescriptor() const @nogc nothrow @safe
     {
         return Nullable!int(fileno);
+    }
+}
+
+class TcpLogger(alias Layout) : Logger
+{
+    private string host;
+
+    private ushort port;
+
+    private TcpSocket socket;
+
+    // must be static to be thread-local
+    private static Appender!(char[]) buffer;
+
+    this(string host, ushort port, uint levels = LogLevel.info.orAbove)
+    {
+        super(levels);
+        this.host = host;
+        this.port = port;
+        this.socket = null;
+        reopen;
+    }
+
+    private void reopen()
+    {
+        import core.thread : Thread;
+
+        if (this.socket !is null)
+        {
+            this.socket.close;
+        }
+        this.socket = new TcpSocket;
+        while (true)
+        {
+            try
+            {
+                this.socket.connect(new InternetAddress(this.host, this.port));
+                return;
+            }
+            catch (SocketException socketException)
+            {
+                fprintf(core.stdc.stdio.stderr, "Error while connecting TCP logger to %.*s:%i: %.*s\n",
+                    cast(int) this.host.length, this.host.ptr,
+                    this.port,
+                    cast(int) socketException.msg.length, socketException.msg.ptr);
+                Thread.sleep(1.seconds);
+            }
+        }
+    }
+
+    override void append(const ref EventInfo eventInfo,
+        scope void delegate(scope Sink sink) putMessage)
+    {
+        // Handle reentrant calls by rolling back buffer position
+        const bufferStart = buffer[].length;
+
+        scope(exit)
+        {
+            buffer.shrinkTo(bufferStart);
+        }
+
+        Layout(buffer, eventInfo, putMessage);
+
+        auto slice = buffer[][bufferStart .. $];
+
+        while (!slice.empty)
+        {
+            const size_t result = this.socket.send(slice);
+
+            if (result == socket.ERROR)
+            {
+                // reconnect and retry.
+                reopen;
+                append(eventInfo, putMessage);
+                return;
+            }
+
+            slice = slice.drop(result);
+        }
     }
 }
 
@@ -486,7 +566,7 @@ version (Posix)
 
             Layout(writer, eventInfo, putMessage);
             writer.put('\0');
-            syslog(priority(eventInfo.level), "%s", writer.data.ptr);
+            syslog(priority(eventInfo.level), "%s", writer[].ptr);
         }
 
         static SyslogLevel priority(LogLevel level) pure
@@ -551,7 +631,7 @@ unittest
     auto writer = appender!string;
 
     layout(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
-    assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
+    assert(writer[] == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 
 // SysTime.toISOExtString has no fixed length and no time-zone offset for local time
@@ -572,7 +652,7 @@ unittest
     auto writer = appender!string;
 
     time._toISOExtString(writer);
-    assert(writer.data == "2003-02-01T12:00:00.123+01:00");
+    assert(writer[] == "2003-02-01T12:00:00.123+01:00");
 }
 
 // SimpleTimeZone.toISOString is private
@@ -592,7 +672,7 @@ unittest
     auto writer = appender!string;
 
     90.minutes._toISOString(writer);
-    assert(writer.data == "+01:30");
+    assert(writer[] == "+01:30");
 }
 
 unittest
@@ -600,5 +680,38 @@ unittest
     auto writer = appender!string;
 
     (-90).minutes._toISOString(writer);
-    assert(writer.data == "-01:30");
+    assert(writer[] == "-01:30");
+}
+
+unittest
+{
+    auto listener = new TcpSocket;
+
+    listener.bind(new InternetAddress(9999));
+    listener.listen(1);
+
+    auto logger = tcpLogger("127.0.0.1", 9999);
+    auto receiver = listener.accept;
+
+    listener.close;
+
+    EventInfo eventInfo;
+
+    eventInfo.time = SysTime.fromISOExtString("2003-02-01T11:55:00.123456Z");
+    eventInfo.level = LogLevel.error;
+    eventInfo.file = "log.d";
+    eventInfo.line = 42;
+
+    logger.append(eventInfo, (scope Sink sink) { sink.put("Hello World"); });
+
+    string line;
+    while (!line.canFind('\n'))
+    {
+        char[128] buffer;
+        const result = receiver.receive(buffer);
+
+        line ~= buffer[0 .. result];
+    }
+    assert(line.until('\n').array == "2003-02-01T11:55:00.123+00:00 error log.d:42 Hello World");
+    receiver.close;
 }
