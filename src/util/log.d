@@ -199,7 +199,7 @@ __gshared Log log;
 
 shared static this()
 {
-    log = Log(stderrLogger);
+    log = Log(stderrLogger(new Layout));
 }
 
 /// Represents information about a logging event.
@@ -215,42 +215,48 @@ struct EventInfo
     size_t line;
 }
 
-auto fileLogger(alias Layout = layout)
-    (string name, uint levels = LogLevel.info.orAbove)
+auto fileLogger(Layout)
+    (Layout layout, string name, uint levels = LogLevel.info.orAbove)
+in (layout !is null)
 {
-    return new FileLogger!Layout(name, levels);
+    return new FileLogger!Layout(layout, name, levels);
 }
 
-auto stderrLogger(alias Layout = layout)
-    (uint levels = LogLevel.warn.orAbove)
+auto stderrLogger(Layout)
+    (Layout layout, uint levels = LogLevel.warn.orAbove)
+in (layout !is null)
 {
-    return new FileLogger!Layout(stderr, levels);
+    return new FileLogger!Layout(layout, stderr, levels);
 }
 
-auto stdoutLogger(alias Layout = layout)
-    (uint levels = LogLevel.info.orAbove)
+auto stdoutLogger(Layout)
+    (Layout layout, uint levels = LogLevel.info.orAbove)
+in (layout !is null)
 {
-    return new FileLogger!Layout(stdout, levels);
+    return new FileLogger!Layout(layout, stdout, levels);
 }
 
-auto rollingFileLogger(alias Layout = layout)
-    (string name, size_t count, size_t size, uint levels = LogLevel.info.orAbove)
+auto rollingFileLogger(Layout)
+    (Layout layout, string name, size_t count, size_t size, uint levels = LogLevel.info.orAbove)
+in (layout !is null)
 {
-    return new RollingFileLogger!Layout(name ~ count.archiveFiles(name), size, levels);
+    return new RollingFileLogger!Layout(layout, name ~ count.archiveFiles(name), size, levels);
 }
 
 version (Posix)
-    auto rotatingFileLogger(alias Layout = layout)
-        (string name, uint levels = LogLevel.info.orAbove)
+    auto rotatingFileLogger(Layout)
+        (Layout layout, string name, uint levels = LogLevel.info.orAbove)
+    in (layout !is null)
     {
-        return new RotatingFileLogger!Layout(name, levels);
+        return new RotatingFileLogger!Layout(layout, name, levels);
     }
 
 version (Posix)
-    auto syslogLogger(alias Layout = syslogLayout)
-        (string name = null, uint levels = LogLevel.info.orAbove)
+    auto syslogLogger(Layout = SyslogLayout)
+        (Layout layout, string name = null, uint levels = LogLevel.info.orAbove)
+    in (layout !is null)
     {
-        return new SyslogLogger!Layout(name, levels);
+        return new SyslogLogger!Layout(layout, name, levels);
     }
 
 /// Returns n file names based on path for archived files.
@@ -298,7 +304,7 @@ abstract class Logger
     }
 }
 
-class FileLogger(alias Layout) : Logger
+class FileLogger(Layout) : Logger
 {
     // must be static to be thread-local
     private static Appender!(char[]) buffer;
@@ -308,18 +314,24 @@ class FileLogger(alias Layout) : Logger
     // store cause it's awkward to derive in fileDescriptor, which must be signal-safe
     private int fileno;
 
-    this(string name, uint levels = LogLevel.info.orAbove)
+    private Layout layout;
+
+    this(Layout layout, string name, uint levels = LogLevel.info.orAbove)
+    in (layout !is null)
     {
         super(levels);
         file = File(name, "ab");
         fileno = file.fileno;
+        this.layout = layout;
     }
 
-    this(File file, uint levels = LogLevel.info.orAbove)
+    this(Layout layout, File file, uint levels = LogLevel.info.orAbove)
+    in (layout !is null)
     {
         super(levels);
         this.file = file;
         fileno = this.file.fileno;
+        this.layout = layout;
     }
 
     override void append(const ref EventInfo eventInfo,
@@ -339,7 +351,7 @@ class FileLogger(alias Layout) : Logger
             buffer.swap(this.buffer);
         }
 
-        Layout(buffer, eventInfo, putMessage);
+        layout.write(buffer, eventInfo, putMessage);
         file.lockingTextWriter.put(buffer.data);
         file.flush;
     }
@@ -350,18 +362,19 @@ class FileLogger(alias Layout) : Logger
     }
 }
 
-class RollingFileLogger(alias Layout) : FileLogger!Layout
+class RollingFileLogger(Layout) : FileLogger!Layout
 {
     private string[] names;
 
     private size_t size;
 
-    this(const string[] names, size_t size, uint levels = LogLevel.info.orAbove)
+    this(Layout layout, const string[] names, size_t size, uint levels = LogLevel.info.orAbove)
+    in (layout !is null)
     in(!names.empty)
     {
+        super(layout, names.front, levels);
         this.names = names.dup;
         this.size = size;
-        super(this.names.front, levels);
     }
 
     override void append(const ref EventInfo eventInfo,
@@ -402,13 +415,13 @@ version (Posix)
        _count.atomicOp!"+="(1);
     }
 
-    class RotatingFileLogger(alias Layout) : FileLogger!Layout
+    class RotatingFileLogger(Layout) : FileLogger!Layout
     {
         private uint count = 0;
 
-        this(string name, uint levels = LogLevel.info.orAbove)
+        this(Layout layout, string name, uint levels = LogLevel.info.orAbove)
         {
-            super(name, levels);
+            super(layout, name, levels);
             setUpSignalHandler;
         }
 
@@ -457,7 +470,7 @@ version (Posix)
 
     private extern (C) void syslog(int priority, const char *format, ...);
 
-    class SyslogLogger(alias Layout) : Logger
+    class SyslogLogger(Layout) : Logger
     {
         enum SyslogLevel
         {
@@ -471,11 +484,15 @@ version (Posix)
             LOG_DEBUG   = 7,  // debug-level messages
         }
 
-        this(string identifier = null, uint levels = LogLevel.info.orAbove)
+        private Layout layout;
+
+        this(Layout layout, string identifier = null, uint levels = LogLevel.info.orAbove)
+        in (layout !is null)
         {
             enum LOG_USER = 1 << 3;
 
             super(levels);
+            this.layout = layout;
             openlog(identifier.empty ? null : identifier.toStringz, 0, LOG_USER);
         }
 
@@ -484,7 +501,7 @@ version (Posix)
         {
             auto writer = appender!string;
 
-            Layout(writer, eventInfo, putMessage);
+            layout.write(writer, eventInfo, putMessage);
             writer.put('\0');
             syslog(priority(eventInfo.level), "%s", writer.data.ptr);
         }
@@ -507,35 +524,41 @@ version (Posix)
         }
     }
 
-    void syslogLayout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
-        scope void delegate(scope Sink sink) putMessage)
+    final class SyslogLayout
     {
-        putMessage(outputRangeObject!(const(char)[])(writer));
+        public void write(Writer)(ref Writer writer, const ref EventInfo eventInfo,
+            scope void delegate(scope Sink sink) putMessage)
+        {
+            putMessage(outputRangeObject!(const(char)[])(writer));
+        }
     }
 }
 
 // Time Thread Category Context layout
-void layout(Writer)(ref Writer writer, const ref EventInfo eventInfo,
-    scope void delegate(scope Sink sink) putMessage)
+final class Layout
 {
-    import core.thread : Thread;
-
-    with (eventInfo)
+    void write(Writer)(ref Writer writer, const ref EventInfo eventInfo,
+        scope void delegate(scope Sink sink) putMessage)
     {
-        time._toISOExtString(writer);
-        writer.formattedWrite!" %-5s %s:%s"(level, file, line);
+        import core.thread : Thread;
 
-        if (Thread thread = Thread.getThis)
+        with (eventInfo)
         {
-            string name = thread.name;
+            time._toISOExtString(writer);
+            writer.formattedWrite!" %-5s %s:%s"(level, file, line);
 
-            if (!name.empty)
-                writer.formattedWrite!" [%s]"(name);
+            if (Thread thread = Thread.getThis)
+            {
+                string name = thread.name;
+
+                if (!name.empty)
+                    writer.formattedWrite!" [%s]"(name);
+            }
+
+            writer.put(' ');
+            putMessage(outputRangeObject!(const(char)[])(writer));
+            writer.put('\n');
         }
-
-        writer.put(' ');
-        putMessage(outputRangeObject!(const(char)[])(writer));
-        writer.put('\n');
     }
 }
 
@@ -549,8 +572,9 @@ unittest
     eventInfo.line = 42;
 
     auto writer = appender!string;
+    auto layout = new Layout;
 
-    layout(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
+    layout.write(writer, eventInfo, (scope Sink sink) { sink.put("don't panic"); });
     assert(writer.data == "2003-02-01T11:55:00.123+00:00 error log.d:42 don't panic\n");
 }
 

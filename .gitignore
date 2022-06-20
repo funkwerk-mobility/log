@@ -1,3 +1,5 @@
 *.a
 dub.selections.json
 log
+.dub/
+log-test-library
