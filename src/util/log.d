@@ -199,7 +199,7 @@ __gshared Log log;
 
 shared static this()
 {
-    log = Log(stderrLogger(new Layout));
+    log = Log(stderrLogger);
 }
 
 /// Represents information about a logging event.
@@ -215,49 +215,38 @@ struct EventInfo
     size_t line;
 }
 
-auto fileLogger(Layout)
-    (Layout layout, string name, uint levels = LogLevel.info.orAbove)
-in (layout !is null)
+auto fileLogger(string name, uint levels = LogLevel.info.orAbove)
 {
-    return new FileLogger!Layout(layout, name, levels);
+    return new FileLogger!Layout(new Layout, name, levels);
 }
 
-auto stderrLogger(Layout)
-    (Layout layout, uint levels = LogLevel.warn.orAbove)
-in (layout !is null)
+auto stderrLogger(uint levels = LogLevel.warn.orAbove)
 {
-    return new FileLogger!Layout(layout, stderr, levels);
+    return new FileLogger!Layout(new Layout, stderr, levels);
 }
 
-auto stdoutLogger(Layout)
-    (Layout layout, uint levels = LogLevel.info.orAbove)
-in (layout !is null)
+auto stdoutLogger(uint levels = LogLevel.info.orAbove)
 {
-    return new FileLogger!Layout(layout, stdout, levels);
+    return new FileLogger!Layout(new Layout, stdout, levels);
 }
 
-auto rollingFileLogger(Layout)
-    (Layout layout, string name, size_t count, size_t size, uint levels = LogLevel.info.orAbove)
-in (layout !is null)
+auto rollingFileLogger(string name, size_t count, size_t size, uint levels = LogLevel.info.orAbove)
 {
-    return new RollingFileLogger!Layout(layout, name ~ count.archiveFiles(name), size, levels);
+    return new RollingFileLogger!Layout(new Layout, name ~ count.archiveFiles(name), size, levels);
 }
 
 version (Posix)
-    auto rotatingFileLogger(Layout)
-        (Layout layout, string name, uint levels = LogLevel.info.orAbove)
-    in (layout !is null)
+{
+    auto rotatingFileLogger(string name, uint levels = LogLevel.info.orAbove)
     {
-        return new RotatingFileLogger!Layout(layout, name, levels);
+        return new RotatingFileLogger!Layout(new Layout, name, levels);
     }
 
-version (Posix)
-    auto syslogLogger(Layout = SyslogLayout)
-        (Layout layout, string name = null, uint levels = LogLevel.info.orAbove)
-    in (layout !is null)
+    auto syslogLogger(string name = null, uint levels = LogLevel.info.orAbove)
     {
-        return new SyslogLogger!Layout(layout, name, levels);
+        return new SyslogLogger!Layout(new Layout, name, levels);
     }
+}
 
 /// Returns n file names based on path for archived files.
 @safe
