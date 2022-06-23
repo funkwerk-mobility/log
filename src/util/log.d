@@ -244,7 +244,7 @@ version (Posix)
 
     auto syslogLogger(string name = null, uint levels = LogLevel.info.orAbove)
     {
-        return new SyslogLogger!Layout(new Layout, name, levels);
+        return new SyslogLogger!SyslogLayout(new SyslogLayout, name, levels);
     }
 }
 
