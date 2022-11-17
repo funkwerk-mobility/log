@@ -90,34 +90,22 @@ private alias Sink = OutputRange!(const(char)[]);
 
 struct Log
 {
-    private Logger[] loggers;
-
-    // preallocate so we can fill it in @nogc fileDescriptors()
-    private int[] buffer;
+    private Logger[] loggers_;
 
     private uint levels;
 
     this(Logger[] loggers ...)
     in (loggers.all!"a !is null")
     {
-        this.loggers = loggers.dup;
-        buffer = new int[this.loggers.length];
-        levels = reduce!((a, b) => a | b.levels)(0, this.loggers);
+        loggers_ = loggers.dup;
+        levels = reduce!((a, b) => a | b.levels)(0, loggers_);
     }
 
-    public int[] fileDescriptors() @nogc nothrow @safe
-    in (buffer.length >= loggers.length)
+    // Backdoor access for maintenance operations such as segfault handling.
+    // See `FileLogger.fileDescriptor`.
+    public Logger[] loggers() @nogc nothrow pure @safe
     {
-        size_t length = 0;
-
-        foreach (logger; loggers)
-        {
-            const fileDescriptor = logger.fileDescriptor;
-
-            if (!fileDescriptor.isNull)
-                buffer[length++] = fileDescriptor.get;
-        }
-        return buffer[0 .. length];
+        return loggers_;
     }
 
     alias trace = append!(LogLevel.trace);
@@ -189,7 +177,7 @@ struct Log
         eventInfo.file = file;
         eventInfo.line = line;
 
-        foreach (logger; loggers)
+        foreach (logger; loggers_)
             if (level & logger.levels)
                 logger.append(eventInfo, putMessage);
     }
@@ -281,16 +269,6 @@ abstract class Logger
 
     abstract void append(const ref EventInfo eventInfo,
         scope void delegate(scope Sink sink) putMessage);
-
-    // Exposed so that client code can write data to the log file directly in
-    // emergency situations, such as a crash.
-    // Returns null if the logger does not use a straightforward file descriptor.
-    // The effect of writing to the returned handle should be some form of
-    // readable logging.
-    Nullable!int fileDescriptor() const @nogc nothrow @safe
-    {
-        return Nullable!int();
-    }
 }
 
 class FileLogger(Layout) : Logger
@@ -345,9 +323,12 @@ class FileLogger(Layout) : Logger
         file.flush;
     }
 
-    override Nullable!int fileDescriptor() const @nogc nothrow @safe
+    // Segfault handling requires limiting ourselves to signal-safe functions,
+    // which is a very limited subset - Phobos/toString/anything GC is right out.
+    // For such cases, offer backdoor access to the file handle.
+    public int fileDescriptor() const @nogc nothrow @safe
     {
-        return Nullable!int(fileno);
+        return fileno;
     }
 }
 
