@@ -129,7 +129,7 @@ struct Log
                     A evaluatedArgs = args;
 
                     _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite!fmt(evaluatedArgs); });
+                        (scope Sink sink) { sink.formattedWrite!(fmt.simplifyNamedReferences)(evaluatedArgs); });
                 }
             }
         }
@@ -145,7 +145,7 @@ struct Log
                     A evaluatedArgs = args;
 
                     _append(level, file, line,
-                        (scope Sink sink) { sink.formattedWrite(fmt, evaluatedArgs); });
+                        (scope Sink sink) { sink.formattedWrite(fmt.simplifyNamedReferences, evaluatedArgs); });
                 }
             }
         }
@@ -181,6 +181,32 @@ struct Log
             if (level & logger.levels)
                 logger.append(eventInfo, putMessage);
     }
+}
+
+// Helper to allow using named references in format strings, ie. treat %{name} equivalent to %s.
+// Avoid std.regex because it's used at CTFE.
+private string simplifyNamedReferences(string fmt)
+{
+    import std.exception : enforce;
+
+    string replacement = fmt;
+
+    while (replacement.canFind("%{"))
+    {
+        enforce(replacement.find("%{").canFind("}"), fmt ~ ": terminating '}' not found");
+        replacement = replacement[0 .. $ - replacement.find("%{").length]
+            ~ "%s"
+            ~ replacement.find("%{").find("}").dropOne;
+    }
+    return replacement;
+}
+
+unittest
+{
+    assert("".simplifyNamedReferences == "");
+    assert("hello".simplifyNamedReferences == "hello");
+    assert("%s world".simplifyNamedReferences == "%s world");
+    assert("hello %{name} world".simplifyNamedReferences == "hello %s world");
 }
 
 __gshared Log log;
