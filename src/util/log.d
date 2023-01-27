@@ -185,11 +185,11 @@ struct Log
 
 // Helper to allow using named references in format strings, ie. treat %{name} equivalent to %s.
 // Avoid std.regex because it's used at CTFE.
-private string simplifyNamedReferences(string fmt)
+private const(char)[] simplifyNamedReferences(const(char)[] fmt)
 {
     import std.exception : enforce;
 
-    string replacement = fmt;
+    const(char)[] replacement = fmt;
 
     while (replacement.canFind("%{"))
     {
