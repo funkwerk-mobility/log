@@ -1,13 +1,14 @@
 {
-    "name": "log",
+    "name": "util",
     "targetType": "library",
-    "description": "Simple Logging for D",
+    "description": "Default logger for log library",
     "copyright": "Copyright © 2014, Mario Kröplin",
     "authors": ["Mario Kröplin"],
     "license" : "BSL-1.0",
     "sourcePaths": ["src"],
-    "dependencies": {},
-    "subPackages": [
-        "./subpackages/util"
-    ]
+    "dependencies": {
+        "log": {
+            "path": "../.."
+        }
+    }
 }
