@@ -1,5 +1,6 @@
 *.a
-dub.selections.json
-log
-.dub/
-log-test-library
+/dub.selections.json
+/log
+/.dub/
+/log-test-library
+/subpackages/util/log-util-test-library

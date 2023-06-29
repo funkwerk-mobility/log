@@ -1,1 +1,4 @@
 language: d
+script:
+- dub test --compiler=${DC}
+- dub test :util --compiler=${DC}
