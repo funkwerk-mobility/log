@@ -7,14 +7,19 @@ module util.log;
 
 import std.algorithm;
 import std.array;
+import std.compiler : version_minor;
 import std.conv;
 import std.datetime;
-import std.format;
+import std.format : formattedWrite;
 import std.range;
 import std.stdio;
 import std.string;
 import std.traits;
 import std.typecons;
+
+private enum supportsStringInterpolation = version_minor >= 108;
+
+static if (supportsStringInterpolation) import core.interpolation;
 
 /// Defines the importance of a log message.
 enum LogLevel
@@ -162,6 +167,24 @@ struct Log
 
                     _append(level, file, line,
                         (scope Sink sink) { sink.put(evaluatedArg.to!string); });
+                }
+            }
+        }
+
+        static if (supportsStringInterpolation)
+        {
+            void append(Fence _ = Fence(), string file = __FILE__, size_t line = __LINE__, A...)
+                (InterpolationHeader header, lazy A args, InterpolationFooter footer)
+            {
+                static if (!level.disabled)
+                {
+                    if (level & levels)
+                    {
+                        A evaluatedArgs = args;
+
+                        _append(level, file, line,
+                            (scope Sink sink) { sink.formattedWrite(header, evaluatedArgs, footer); });
+                    }
                 }
             }
         }
@@ -621,4 +644,39 @@ unittest
 
     (-90).minutes._toISOString(writer);
     assert(writer.data == "-01:30");
+}
+
+static if (supportsStringInterpolation)
+{
+    // Placeholder pending https://issues.dlang.org/show_bug.cgi?id=24550
+    private void formattedWrite(Sink, Args...)(ref Sink sink, InterpolationHeader _header, Args args,
+        InterpolationFooter _footer)
+    {
+        import std.format : formattedWrite;
+        import std.meta : aliasSeqOf, Filter, staticMap;
+
+        // Translate interpolation string to classic format string
+        enum string formatString = [staticMap!(toFormatStringFragment, Args)].join;
+        enum bool isFormatValueArgument(size_t i) = toFormatStringFragment!(Args[i]) == "";
+        enum size_t[] valueArgIndexes = [Filter!(isFormatValueArgument, aliasSeqOf!(Args.length.iota))];
+        enum string valueArgs = valueArgIndexes.map!(a => format!"args[%s]"(a)).join;
+
+        mixin("sink.formattedWrite!formatString(" ~ valueArgs ~ ");");
+    }
+
+    private template toFormatStringFragment(alias A)
+    {
+        static if (is(A : InterpolatedLiteral!str, string str))
+        {
+            enum toFormatStringFragment = str;
+        }
+        else static if (is(A : InterpolatedExpression!str, string str))
+        {
+            enum toFormatStringFragment = "%s";
+        }
+        else
+        {
+            enum toFormatStringFragment = "";
+        }
+    }
 }
