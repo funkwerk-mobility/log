@@ -37,13 +37,6 @@ typedef struct {
     int logger_count;
 } Log;
 
-typedef struct {
-    unsigned long start;
-    unsigned long end;
-    char permissions[5];
-    char pathname[256];
-} Mapping;
-
 const char* decode_log_level(unsigned int level) {
     if (level & TRACE) return "trace";
     if (level & INFO) return "info";
@@ -95,50 +88,24 @@ unsigned long find_base_address(pid_t pid) {
         return 0;
     }
 
+    /**
+     * Return first mapping. They're sorted by start,
+     * and the first mapping is always the binary.
+     */
     char line[512];
-    Mapping* mappings = NULL;
-    size_t mapping_count = 0;
-    char first_pathname[256] = {0};
-
     while (fgets(line, sizeof(line), fp)) {
-        Mapping mapping;
-        if (sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s",
-                   &mapping.start, &mapping.end,
-                   mapping.permissions, mapping.pathname) >= 3) {
-
-            if (mapping_count == 0 && mapping.pathname[0] == '/') {
-                strncpy(first_pathname, mapping.pathname, sizeof(first_pathname) - 1);
-            }
-
-            if (strcmp(mapping.pathname, first_pathname) == 0) {
-                mappings = realloc(mappings, (mapping_count + 1) * sizeof(Mapping));
-                mappings[mapping_count++] = mapping;
-            }
+        unsigned long start;
+        unsigned long end;
+        char permissions[5];
+        if (sscanf(line, "%lx-%lx %4s", &start, &end, permissions) == 3) {
+            fclose(fp);
+            return start;
         }
     }
-
     fclose(fp);
 
-    if (mapping_count == 0) {
-        fprintf(stderr, "No valid mappings found\n");
-        return 0;
-    }
-
-    // Sort mappings by start address
-    for (size_t i = 0; i < mapping_count - 1; i++) {
-        for (size_t j = 0; j < mapping_count - i - 1; j++) {
-            if (mappings[j].start > mappings[j + 1].start) {
-                Mapping temp = mappings[j];
-                mappings[j] = mappings[j + 1];
-                mappings[j + 1] = temp;
-            }
-        }
-    }
-
-    unsigned long base_addr = mappings[0].start;
-    free(mappings);
-
-    return base_addr;
+    fprintf(stderr, "No valid mappings found\n");
+    return 0;
 }
 
 unsigned long find_symbol_address(pid_t pid, const char* symbol_name) {
