@@ -18,6 +18,8 @@
 #define MAX_PROCESS_NAME 256
 #define MAX_LINE_LENGTH 512
 
+#define LOG_SYMBOL_NAME "_D4util3logQeSQmQj3Log"
+
 typedef enum {
     TRACE = 1,
     INFO = 2,
@@ -340,6 +342,15 @@ void print_usage(const char* program_name) {
     printf("\nIf only [new_level] is provided, all loggers will be set to that level.\n");
 }
 
+int confirm_action(const char* prompt) {
+    printf("%s (y/n): ", prompt);
+    char response;
+    if (scanf(" %c", &response) != 1) {
+        return 0;
+    }
+    return response == 'y' || response == 'Y';
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
         print_usage(argv[0]);
@@ -351,7 +362,12 @@ int main(int argc, char* argv[]) {
     const char* new_level_str = NULL;
 
     if (strcmp(argv[1], "-p") == 0 && argc >= 3) {
-        pid = atoi(argv[2]);
+        char* endptr;
+        pid = strtol(argv[2], &endptr, 10);
+        if (*endptr != '\0' || pid <= 0) {
+            fprintf(stderr, "Invalid PID\n");
+            return 1;
+        }
         if (argc > 3) {
             if (argc == 4) {
                 new_level_str = argv[3];
@@ -388,12 +404,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (pid == -1) {
-        fprintf(stderr, "Invalid PID\n");
-        return 1;
-    }
-
-    unsigned long log_addr = find_symbol_address(pid, "_D4util3logQeSQmQj3Log");
+    unsigned long log_addr = find_symbol_address(pid, LOG_SYMBOL_NAME);
     if (log_addr == 0) {
         fprintf(stderr, "Failed to find Log symbol\n");
         return 1;
@@ -418,9 +429,7 @@ int main(int argc, char* argv[]) {
             printf("%zu: %s, level: %s\n", i + 1, log.loggers[i].name, decode_log_level(log.loggers[i].level));
         }
 
-        printf("\nAre you sure you want to change the log level? (y/n): ");
-        char confirm;
-        if (scanf(" %c", &confirm) != 1 || (confirm != 'y' && confirm != 'Y')) {
+        if (!confirm_action("Are you sure you want to change the log level?")) {
             printf("Operation cancelled.\n");
             return 0;
         }
