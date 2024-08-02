@@ -60,26 +60,14 @@ unsigned int encode_log_level(const char* level_str) {
 }
 
 ssize_t read_process_memory(pid_t pid, unsigned long addr, void* buffer, size_t size) {
-    struct iovec local[1];
-    struct iovec remote[1];
-
-    local[0].iov_base = buffer;
-    local[0].iov_len = size;
-    remote[0].iov_base = (void*)addr;
-    remote[0].iov_len = size;
-
+    struct iovec local[1] = {{buffer, size}};
+    struct iovec remote[1] = {{(void*)addr, size}};
     return process_vm_readv(pid, local, 1, remote, 1, 0);
 }
 
-ssize_t write_process_memory(pid_t pid, unsigned long addr, void* buffer, size_t size) {
-    struct iovec local[1];
-    struct iovec remote[1];
-
-    local[0].iov_base = buffer;
-    local[0].iov_len = size;
-    remote[0].iov_base = (void*)addr;
-    remote[0].iov_len = size;
-
+ssize_t write_process_memory(pid_t pid, unsigned long addr, const void* buffer, size_t size) {
+    struct iovec local[1] = {{(void*)buffer, size}};
+    struct iovec remote[1] = {{(void*)addr, size}};
     return process_vm_writev(pid, local, 1, remote, 1, 0);
 }
 
@@ -93,18 +81,13 @@ unsigned long find_base_address(pid_t pid) {
     }
 
     /**
-     * Return first mapping. They're sorted by start,
+     * Use the first mapping. They're sorted by start,
      * and the first mapping is always the binary.
      */
     char line[MAX_LINE_LENGTH];
     unsigned long start_address = 0;
-    while (fgets(line, sizeof(line), fp)) {
-        unsigned long start, end;
-        char permissions[5];
-        if (sscanf(line, "%lx-%lx %4s", &start, &end, permissions) == 3) {
-            start_address = start;
-            break;
-        }
+    if (fgets(line, sizeof(line), fp)) {
+        sscanf(line, "%lx-", &start_address);
     }
     fclose(fp);
 
