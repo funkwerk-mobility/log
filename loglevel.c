@@ -1,17 +1,12 @@
 #define _GNU_SOURCE
+#include <dirent.h>
+#include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <sys/types.h>
 #include <sys/uio.h>
-#include <sys/ptrace.h>
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <elf.h>
-#include <dirent.h>
-#include <limits.h>
+#include <unistd.h>
 
 #define MAX_LOGGERS 100
 #define MAX_SYMBOL_NAME 256
