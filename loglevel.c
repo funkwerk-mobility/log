@@ -11,10 +11,12 @@
 #include <sys/stat.h>
 #include <elf.h>
 #include <dirent.h>
+#include <limits.h>
 
 #define MAX_LOGGERS 100
 #define MAX_SYMBOL_NAME 256
 #define MAX_PROCESS_NAME 256
+#define MAX_LINE_LENGTH 512
 
 typedef enum {
     TRACE = 1,
@@ -34,7 +36,7 @@ typedef struct {
     pid_t pid;
     unsigned long address;
     Logger loggers[MAX_LOGGERS];
-    int logger_count;
+    size_t logger_count;
 } Log;
 
 const char* decode_log_level(unsigned int level) {
@@ -92,25 +94,26 @@ unsigned long find_base_address(pid_t pid) {
      * Return first mapping. They're sorted by start,
      * and the first mapping is always the binary.
      */
-    char line[512];
+    char line[MAX_LINE_LENGTH];
+    unsigned long start_address = 0;
     while (fgets(line, sizeof(line), fp)) {
-        unsigned long start;
-        unsigned long end;
+        unsigned long start, end;
         char permissions[5];
         if (sscanf(line, "%lx-%lx %4s", &start, &end, permissions) == 3) {
-            fclose(fp);
-            return start;
+            start_address = start;
+            break;
         }
     }
     fclose(fp);
 
-    fprintf(stderr, "No valid mappings found\n");
-    return 0;
+    if (start_address == 0) {
+        fprintf(stderr, "No valid mappings found\n");
+    }
+    return start_address;
 }
 
 unsigned long find_symbol_address(pid_t pid, const char* symbol_name) {
     unsigned long base_addr = find_base_address(pid);
-
     if (base_addr == 0) {
         fprintf(stderr, "Failed to find executable mapping\n");
         return 0;
@@ -160,7 +163,7 @@ unsigned long find_symbol_address(pid_t pid, const char* symbol_name) {
     }
 
     Elf64_Sym sym;
-    char name[256];
+    char name[MAX_SYMBOL_NAME];
     for (unsigned long addr = symtab_addr; ; addr += sizeof(sym)) {
         if (read_process_memory(pid, addr, &sym, sizeof(sym)) == -1) {
             perror("Failed to read symbol");
@@ -250,13 +253,13 @@ unsigned int get_global_log_level(pid_t pid, unsigned long log_address) {
 }
 
 int set_log_level(Log* log, int logger_index, unsigned int new_level) {
-    if (logger_index < -1 || logger_index >= log->logger_count) {
+    if (logger_index < -1 || (size_t)logger_index >= log->logger_count) {
         fprintf(stderr, "Invalid logger index\n");
         return -1;
     }
 
     if (logger_index == -1) {
-        for (int i = 0; i < log->logger_count; i++) {
+        for (size_t i = 0; i < log->logger_count; i++) {
             if (write_process_memory(log->pid, log->loggers[i].address + 16, &new_level, sizeof(new_level)) == -1) {
                 perror("Failed to write logger level");
                 return -1;
@@ -272,7 +275,7 @@ int set_log_level(Log* log, int logger_index, unsigned int new_level) {
     }
 
     unsigned int max_level = 0;
-    for (int i = 0; i < log->logger_count; i++) {
+    for (size_t i = 0; i < log->logger_count; i++) {
         if (log->loggers[i].level > max_level) {
             max_level = log->loggers[i].level;
         }
@@ -352,9 +355,13 @@ int main(int argc, char* argv[]) {
         if (argc > 3) {
             if (argc == 4) {
                 new_level_str = argv[3];
-            } else {
+            } else if (argc == 5) {
                 logger_index = atoi(argv[3]) - 1;
                 new_level_str = argv[4];
+            } else {
+                fprintf(stderr, "Too many arguments\n");
+                print_usage(argv[0]);
+                return 1;
             }
         }
     } else if (strcmp(argv[1], "-s") == 0 && argc >= 3) {
@@ -366,9 +373,13 @@ int main(int argc, char* argv[]) {
         if (argc > 3) {
             if (argc == 4) {
                 new_level_str = argv[3];
-            } else {
+            } else if (argc == 5) {
                 logger_index = atoi(argv[3]) - 1;
                 new_level_str = argv[4];
+            } else {
+                fprintf(stderr, "Too many arguments\n");
+                print_usage(argv[0]);
+                return 1;
             }
         }
     } else {
@@ -403,14 +414,13 @@ int main(int argc, char* argv[]) {
 
         printf("Current log levels:\n");
         printf("Global log level: %s\n", decode_log_level(get_global_log_level(pid, log_addr)));
-        for (int i = 0; i < log.logger_count; i++) {
-            printf("%d: %s, level: %s\n", i + 1, log.loggers[i].name, decode_log_level(log.loggers[i].level));
+        for (size_t i = 0; i < log.logger_count; i++) {
+            printf("%zu: %s, level: %s\n", i + 1, log.loggers[i].name, decode_log_level(log.loggers[i].level));
         }
 
         printf("\nAre you sure you want to change the log level? (y/n): ");
         char confirm;
-        scanf(" %c", &confirm);
-        if (confirm != 'y' && confirm != 'Y') {
+        if (scanf(" %c", &confirm) != 1 || (confirm != 'y' && confirm != 'Y')) {
             printf("Operation cancelled.\n");
             return 0;
         }
@@ -424,8 +434,8 @@ int main(int argc, char* argv[]) {
 
     printf("Global log level: %s\n", decode_log_level(get_global_log_level(pid, log_addr)));
     printf("Configured loggers:\n");
-    for (int i = 0; i < log.logger_count; i++) {
-        printf("%d: %-30s, level: %s\n", i + 1, log.loggers[i].name, decode_log_level(log.loggers[i].level));
+    for (size_t i = 0; i < log.logger_count; i++) {
+        printf("%zu: %-30s, level: %s\n", i + 1, log.loggers[i].name, decode_log_level(log.loggers[i].level));
     }
 
     return 0;
