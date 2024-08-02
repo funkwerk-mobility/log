@@ -46,10 +46,10 @@ const char* decode_log_level(unsigned int level) {
 }
 
 unsigned int encode_log_level(const char* level_str) {
-    if (strcasecmp(level_str, "trace") == 0) return TRACE;
-    if (strcasecmp(level_str, "info") == 0) return INFO;
-    if (strcasecmp(level_str, "warn") == 0) return WARN;
-    if (strcasecmp(level_str, "error") == 0) return ERROR;
+    if (strcasecmp(level_str, "trace") == 0) return FATAL | ERROR | WARN | INFO | TRACE;
+    if (strcasecmp(level_str, "info") == 0) return FATAL | ERROR | WARN | INFO;
+    if (strcasecmp(level_str, "warn") == 0) return FATAL | ERROR | WARN;
+    if (strcasecmp(level_str, "error") == 0) return FATAL | ERROR;
     if (strcasecmp(level_str, "fatal") == 0) return FATAL;
     return 0;
 }
@@ -233,7 +233,7 @@ unsigned int get_global_log_level(pid_t pid, unsigned long log_address) {
 }
 
 int set_log_level(Log* log, int logger_index, unsigned int new_level) {
-    if (logger_index < -1 || (size_t)logger_index >= log->logger_count) {
+    if (logger_index != -1 && (size_t)logger_index >= log->logger_count) {
         fprintf(stderr, "Invalid logger index\n");
         return -1;
     }
