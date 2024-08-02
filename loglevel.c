@@ -233,7 +233,7 @@ unsigned int get_global_log_level(pid_t pid, unsigned long log_address) {
 }
 
 int set_log_level(Log* log, int logger_index, unsigned int new_level) {
-    if (logger_index != -1 && (size_t)logger_index >= log->logger_count) {
+    if (logger_index != -1 && (logger_index < 0 || (size_t) logger_index >= log->logger_count)) {
         fprintf(stderr, "Invalid logger index\n");
         return -1;
     }
