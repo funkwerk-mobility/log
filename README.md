@@ -17,6 +17,7 @@ Run the included [example](example.d) to see the simple logging in action:
 
 ## Related Projects
 
+- [Tool to change log level during operation.](https://github.com/funkwerk-mobility/log/blob/feature/change-loglevel/loglevel.c)
 - [log.d](https://github.com/jsancio/log.d):
   abandoned D standard library submission, inspired by
   [glog](https://github.com/google/glog)
